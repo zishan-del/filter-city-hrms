@@ -2,22 +2,35 @@ name: Diagnose employee leave and attendance
 on:
   push:
     branches: [fix/employee-actions]
+    paths:
+      - 'index.html'
+      - 'api/hrms.js'
+      - '.github/workflows/diagnose-employee-actions.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect relevant functions
+      - name: Extract diagnostics
         run: |
           python - <<'PY'
           from pathlib import Path
+          out=[]
           for fn in ['index.html','api/hrms.js']:
               s=Path(fn).read_text()
-              print('===',fn,'===')
+              out.append('=== '+fn+' ===')
               for term in ['checkAttendance','viewAttendance','viewLeave','submitLeave',"resource === 'attendance'","resource === 'leave'",'function api(']:
                   i=s.find(term)
-                  print('\nTERM',term,'INDEX',i)
-                  if i>=0: print(s[max(0,i-800):i+2200])
+                  out.append('\nTERM '+term+' INDEX '+str(i))
+                  if i>=0: out.append(s[max(0,i-1800):i+5000])
+          Path('employee-actions-diagnostics.txt').write_text('\n'.join(out))
           PY
+      - name: Commit diagnostics
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add employee-actions-diagnostics.txt
+          git commit -m 'Add employee action diagnostics' || true
+          git push

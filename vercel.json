@@ -6,11 +6,9 @@
   "outputDirectory": ".",
   "functions": {
     "api/index.js": {
-      "runtime": "nodejs22.x",
       "maxDuration": 30
     },
     "api/hrms.js": {
-      "runtime": "nodejs22.x",
       "maxDuration": 30
     }
   },

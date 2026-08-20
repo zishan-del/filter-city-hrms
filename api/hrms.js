@@ -47,6 +47,7 @@ function makeToken(user) {
   return Buffer.from(JSON.stringify({
     id: user.id,
     role: user.role,
+    employee_id: user.employee_id || null,
     exp: Date.now() + 24 * 60 * 60 * 1000
   })).toString('base64url');
 }

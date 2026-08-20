@@ -1,0 +1,44 @@
+name: Fix mobile menu drawer
+on:
+  push:
+    branches: [fix/mobile-menu]
+    paths:
+      - '.github/workflows/mobile-menu-fix.yml'
+      - 'index.html'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch mobile drawer behavior
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text()
+          old = "function render(page){current=page;"
+          new = "function render(page){closeMenu();current=page;"
+          if old not in s:
+              raise SystemExit('render anchor not found')
+          if new not in s:
+              s = s.replace(old, new, 1)
+          old2 = "function toggleMenu(){document.getElementById('sidebar').classList.toggle('open')}"
+          new2 = "function closeMenu(){document.getElementById('sidebar').classList.remove('open')}function toggleMenu(){document.getElementById('sidebar').classList.toggle('open')}"
+          if old2 not in s:
+              raise SystemExit('toggle anchor not found')
+          if new2 not in s:
+              s = s.replace(old2, new2, 1)
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git commit -m 'Fix mobile navigation drawer closing after selection' || true
+          git push

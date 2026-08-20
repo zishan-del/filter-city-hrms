@@ -1,0 +1,23 @@
+name: Diagnose employee leave and attendance
+on:
+  push:
+    branches: [fix/employee-actions]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect relevant functions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for fn in ['index.html','api/hrms.js']:
+              s=Path(fn).read_text()
+              print('===',fn,'===')
+              for term in ['checkAttendance','viewAttendance','viewLeave','submitLeave',"resource === 'attendance'","resource === 'leave'",'function api(']:
+                  i=s.find(term)
+                  print('\nTERM',term,'INDEX',i)
+                  if i>=0: print(s[max(0,i-800):i+2200])
+          PY

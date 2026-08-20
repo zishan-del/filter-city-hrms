@@ -1,36 +1,35 @@
-name: Diagnose employee leave and attendance
+name: Fix employee leave and attendance
 on:
   push:
     branches: [fix/employee-actions]
     paths:
-      - 'index.html'
       - 'api/hrms.js'
       - '.github/workflows/diagnose-employee-actions.yml'
 permissions:
   contents: write
 jobs:
-  diagnose:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extract diagnostics
+      - name: Add employee ID to employee auth token
         run: |
           python - <<'PY'
           from pathlib import Path
-          out=[]
-          for fn in ['index.html','api/hrms.js']:
-              s=Path(fn).read_text()
-              out.append('=== '+fn+' ===')
-              for term in ['checkAttendance','viewAttendance','viewLeave','submitLeave',"resource === 'attendance'","resource === 'leave'",'function api(']:
-                  i=s.find(term)
-                  out.append('\nTERM '+term+' INDEX '+str(i))
-                  if i>=0: out.append(s[max(0,i-1800):i+5000])
-          Path('employee-actions-diagnostics.txt').write_text('\n'.join(out))
+          p=Path('api/hrms.js')
+          s=p.read_text()
+          old="""    id: user.id,\n    role: user.role,\n    exp: Date.now() + 24 * 60 * 60 * 1000"""
+          new="""    id: user.id,\n    role: user.role,\n    employee_id: user.employee_id || null,\n    exp: Date.now() + 24 * 60 * 60 * 1000"""
+          if old not in s:
+              raise SystemExit('Expected token block not found; no changes made')
+          if new not in s:
+              s=s.replace(old,new,1)
+          p.write_text(s)
           PY
-      - name: Commit diagnostics
+      - name: Commit fix
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add employee-actions-diagnostics.txt
-          git commit -m 'Add employee action diagnostics' || true
+          git add api/hrms.js
+          git commit -m 'Fix employee attendance and leave authentication' || true
           git push

@@ -1,1 +1,17 @@
-{"version":2,"builds":[{"src":"server.js","use":"@vercel/node"}],"routes":[{"src":"/api/(.*)","dest":"/server.js"},{"src":"/","dest":"/public/index.html"},{"src":"/(.*)","dest":"/public/$1"}]}
+{
+  "version": 2,
+  "functions": {
+    "api/[...path].js": {
+      "runtime": "nodejs22.x",
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, max-age=0" }
+      ]
+    }
+  ]
+}

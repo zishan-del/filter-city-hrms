@@ -72,10 +72,16 @@ async function ensureSchema() {
     department TEXT DEFAULT '',
     job_title TEXT DEFAULT '',
     salary NUMERIC(14,2) DEFAULT 0,
+    housing_allowance NUMERIC(14,2) DEFAULT 0,
+    transport_allowance NUMERIC(14,2) DEFAULT 0,
+    other_allowance NUMERIC(14,2) DEFAULT 0,
     bank_details TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'Active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS housing_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS transport_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS other_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS leave_cycle_years NUMERIC(5,2) NOT NULL DEFAULT 2`;
   await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS last_leave_end_date DATE`;
   await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS next_leave_date DATE`;
@@ -167,9 +173,23 @@ async function login(req, res) {
   return send(res, 200, { token: makeToken(user), user: { id:user.id, username:user.username, role:user.role, employeeId:user.employee_id || null } });
 }
 
+async function ensureCurrentPayroll() {
+  const month = new Date().toISOString().slice(0,7);
+  const employees = await sql`SELECT employee_id,salary,housing_allowance,transport_allowance,other_allowance,status FROM employees WHERE status='Active' ORDER BY employee_id`;
+  for (const e of employees) {
+    const existing = await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;
+    if (existing.length) continue;
+    const basic = Number(e.salary || 0);
+    const allowances = Number(e.housing_allowance || 0) + Number(e.transport_allowance || 0) + Number(e.other_allowance || 0);
+    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary)
+      VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;
+  }
+}
+
 async function data(req, res) {
   const user = auth(req);
   if (!user) return send(res, 401, { error: 'Unauthorized' });
+  await ensureCurrentPayroll();
   const [users, employees, attendance, tasks, leaves, holidays, payroll, eosb, settings] = await Promise.all([
     sql`SELECT id,username,role,employee_id,active FROM users ORDER BY id`,
     sql`SELECT * FROM employees ORDER BY id`,
@@ -177,7 +197,7 @@ async function data(req, res) {
     sql`SELECT * FROM tasks ORDER BY id DESC`,
     sql`SELECT * FROM leave_requests ORDER BY id DESC`,
     sql`SELECT * FROM holidays ORDER BY holiday_date`,
-    sql`SELECT * FROM payroll ORDER BY id DESC`,
+    sql`SELECT * FROM payroll ORDER BY pay_month DESC,id DESC`,
     sql`SELECT * FROM eosb_records ORDER BY id DESC`,
     sql`SELECT * FROM settings WHERE id=1`
   ]);
@@ -193,8 +213,8 @@ function adminOnly(user, res) {
 }
 
 async function createEmployee(body) {
-  const e = await sql`INSERT INTO employees(employee_id,full_name,mobile,national_id,nationality,joining_date,department,job_title,salary,bank_details,status,leave_cycle_years,last_leave_end_date,next_leave_date,planned_leave_days)
-    VALUES(${body.employee_id},${body.full_name},${body.mobile||''},${body.national_id||''},${body.nationality||'Saudi'},${body.joining_date||null},${body.department||''},${body.job_title||''},${Number(body.salary||0)},${body.bank_details||''},${body.status||'Active'},${Number(body.leave_cycle_years||2)},${body.last_leave_end_date||null},${body.next_leave_date||null},${Math.min(60,Math.max(30,Number(body.planned_leave_days||30)))}) RETURNING *`;
+  const e = await sql`INSERT INTO employees(employee_id,full_name,mobile,national_id,nationality,joining_date,department,job_title,salary,housing_allowance,transport_allowance,other_allowance,bank_details,status,leave_cycle_years,last_leave_end_date,next_leave_date,planned_leave_days)
+    VALUES(${body.employee_id},${body.full_name},${body.mobile||''},${body.national_id||''},${body.nationality||'Saudi'},${body.joining_date||null},${body.department||''},${body.job_title||''},${Number(body.salary||0)},${Number(body.housing_allowance||0)},${Number(body.transport_allowance||0)},${Number(body.other_allowance||0)},${body.bank_details||''},${body.status||'Active'},${Number(body.leave_cycle_years||2)},${body.last_leave_end_date||null},${body.next_leave_date||null},${Math.min(60,Math.max(30,Number(body.planned_leave_days||30)))}) RETURNING *`;
   if (body.username && body.password) {
     await sql`INSERT INTO users(username,password_hash,role,employee_id,active) VALUES(${body.username},${hash(body.password)},'EMPLOYEE',${body.employee_id},${body.status !== 'Inactive'})
       ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash, employee_id=EXCLUDED.employee_id, active=EXCLUDED.active`;
@@ -203,7 +223,7 @@ async function createEmployee(body) {
 }
 
 async function updateEmployee(id, body) {
-  const e = await sql`UPDATE employees SET full_name=${body.full_name},mobile=${body.mobile||''},national_id=${body.national_id||''},nationality=${body.nationality||'Saudi'},joining_date=${body.joining_date||null},department=${body.department||''},job_title=${body.job_title||''},salary=${Number(body.salary||0)},bank_details=${body.bank_details||''},status=${body.status||'Active'},leave_cycle_years=${Number(body.leave_cycle_years||2)},last_leave_end_date=${body.last_leave_end_date||null},next_leave_date=${body.next_leave_date||null},planned_leave_days=${Math.min(60,Math.max(30,Number(body.planned_leave_days||30)))} WHERE id=${id} RETURNING *`;
+  const e = await sql`UPDATE employees SET full_name=${body.full_name},mobile=${body.mobile||''},national_id=${body.national_id||''},nationality=${body.nationality||'Saudi'},joining_date=${body.joining_date||null},department=${body.department||''},job_title=${body.job_title||''},salary=${Number(body.salary||0)},housing_allowance=${Number(body.housing_allowance||0)},transport_allowance=${Number(body.transport_allowance||0)},other_allowance=${Number(body.other_allowance||0)},bank_details=${body.bank_details||''},status=${body.status||'Active'},leave_cycle_years=${Number(body.leave_cycle_years||2)},last_leave_end_date=${body.last_leave_end_date||null},next_leave_date=${body.next_leave_date||null},planned_leave_days=${Math.min(60,Math.max(30,Number(body.planned_leave_days||30)))} WHERE id=${id} RETURNING *`;
   if (!e.length) return null;
   if (body.username) {
     await sql`UPDATE users SET username=${body.username}, active=${body.status !== 'Inactive'} WHERE employee_id=${e[0].employee_id}`;
@@ -312,9 +332,19 @@ async function handle(req, res) {
   if (resource === 'payroll') {
     if (!adminOnly(user,res)) return;
     if (req.method === 'POST') {
-      const basic=Number(body.basic_salary||0), allowances=Number(body.allowances||0), deductions=Number(body.deductions||0);
+      const empRows = await sql`SELECT salary,housing_allowance,transport_allowance,other_allowance FROM employees WHERE employee_id=${body.employee_id} LIMIT 1`;
+      if (!empRows.length) return send(res,404,{error:'Employee not found'});
+      const e=empRows[0];
+      const basic=Number(body.basic_salary ?? e.salary ?? 0);
+      const allowances=Number(body.allowances ?? (Number(e.housing_allowance||0)+Number(e.transport_allowance||0)+Number(e.other_allowance||0));
+      const deductions=Number(body.deductions||0);
       const row=await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${body.employee_id},${body.pay_month},${basic},${allowances},${deductions},${basic+allowances-deductions}) RETURNING *`;
       return send(res,201,{payroll:row[0]});
+    }
+    if (req.method === 'PUT' && id) {
+      const basic=Number(body.basic_salary||0), allowances=Number(body.allowances||0), deductions=Number(body.deductions||0);
+      const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions} WHERE id=${id} RETURNING *`;
+      return send(res,200,{payroll:row[0]});
     }
   }
 

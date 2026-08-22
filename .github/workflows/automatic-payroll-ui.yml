@@ -1,0 +1,47 @@
+name: Build automatic payroll UI
+
+on:
+  push:
+    branches: [feature/automatic-payroll]
+
+permissions:
+  contents: write
+
+jobs:
+  update-ui:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update payroll UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          old='<div class="field"><label>Salary</label><input id="salary" type="number" step="0.01" value="${e.salary||0}"></div>'
+          new=old+'<div class="field"><label>Housing allowance</label><input id="housing_allowance" type="number" step="0.01" value="${e.housing_allowance||0}"></div><div class="field"><label>Transport allowance</label><input id="transport_allowance" type="number" step="0.01" value="${e.transport_allowance||0}"></div><div class="field"><label>Other fixed allowance</label><input id="other_allowance" type="number" step="0.01" value="${e.other_allowance||0}"></div>'
+          if old in s and 'id="housing_allowance"' not in s:
+              s=s.replace(old,new,1)
+          old2='salary:salary.value,bank_details:bank_details.value,status:status.value,leave_cycle_years:'
+          new2='salary:salary.value,housing_allowance:housing_allowance.value,transport_allowance:transport_allowance.value,other_allowance:other_allowance.value,bank_details:bank_details.value,status:status.value,leave_cycle_years:'
+          s=s.replace(old2,new2,1)
+          start=s.index('function viewPayroll(){')
+          end=s.index('function viewEOSB(){',start)
+          payroll='''function viewPayroll(){if(role!==\'ADMIN\')return `<div class="section"><div class="empty">Admin only.</div></div>`;const months=[...new Set(state.payroll.map(p=>p.pay_month))];const month=new Date().toISOString().slice(0,7);const selected=months.includes(month)?month:(months[0]||month);const rows=state.payroll.filter(p=>p.pay_month===selected);return `<div class="section"><div class="section-head"><b>Payroll</b><div class="actions"><label style="display:flex;align-items:center;gap:6px">Month <select id="payroll_month" onchange="renderPayrollMonth()">${[...new Set([month,...months])].sort().reverse().map(m=>`<option ${m===selected?'selected':''}>${m}</option>`).join('')}</select></label><button onclick="payrollForm()">+ Add / Adjust Payroll</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Month</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net</th><th></th></tr></thead><tbody>${rows.map(p=>`<tr><td>${esc(p.employee_id)}</td><td>${esc(p.pay_month)}</td><td>${Number(p.basic_salary).toFixed(2)}</td><td>${Number(p.allowances).toFixed(2)}</td><td>${Number(p.deductions).toFixed(2)}</td><td><b>${Number(p.net_salary).toFixed(2)}</b></td><td><button onclick='payrollForm(${JSON.stringify(p)})'>Edit</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No payroll records.</td></tr>'}</tbody></table></div></div>`}
+function renderPayrollMonth(){render('Payroll')}
+function payrollForm(p={}){const emp=state.employees.find(e=>e.employee_id===p.employee_id)||state.employees[0]||{};const basic=p.id?p.basic_salary:(emp.salary||0);const allowances=p.id?p.allowances:(Number(emp.housing_allowance||0)+Number(emp.transport_allowance||0)+Number(emp.other_allowance||0));document.getElementById('content').innerHTML=`<div class="section"><div class="section-head"><b>${p.id?'Edit':'Add'} Payroll</b><button class="secondary" onclick="render('Payroll')">Back</button></div><div class="form-grid"><div class="field"><label>Employee</label><select id="pay_emp" onchange="fillPayrollDefaults()">${state.employees.map(e=>`<option value="${esc(e.employee_id)}" ${e.employee_id===(p.employee_id||emp.employee_id)?'selected':''}>${esc(e.employee_id)} — ${esc(e.full_name)}</option>`).join('')}</select></div><div class="field"><label>Pay month</label><input id="pay_month" type="month" value="${esc(p.pay_month||new Date().toISOString().slice(0,7))}"></div><div class="field"><label>Basic salary</label><input id="pay_basic" type="number" step="0.01" value="${basic}"></div><div class="field"><label>Housing allowance</label><input id="pay_housing" type="number" step="0.01" value="${p.id?'':emp.housing_allowance||0}"><small class="muted">Included in monthly allowances</small></div><div class="field"><label>Transport allowance</label><input id="pay_transport" type="number" step="0.01" value="${p.id?'':emp.transport_allowance||0}"></div><div class="field"><label>Other fixed allowance</label><input id="pay_other" type="number" step="0.01" value="${p.id?'':emp.other_allowance||0}"></div><div class="field"><label>Total allowances</label><input id="pay_allow" type="number" step="0.01" value="${allowances}"></div><div class="field"><label>Deductions</label><input id="pay_ded" type="number" step="0.01" value="${p.deductions||0}"></div><div class="field"><label>Net salary</label><input id="pay_net" type="number" step="0.01" value="${Number(basic)+Number(allowances)-Number(p.deductions||0)}" readonly></div><div class="full"><button onclick="savePayroll(${p.id||'null'})">Save to Cloud</button></div></div></div>`}
+function fillPayrollDefaults(){const e=state.employees.find(x=>x.employee_id===pay_emp.value)||{};pay_basic.value=e.salary||0;pay_housing.value=e.housing_allowance||0;pay_transport.value=e.transport_allowance||0;pay_other.value=e.other_allowance||0;pay_allow.value=Number(pay_housing.value||0)+Number(pay_transport.value||0)+Number(pay_other.value||0);pay_net.value=Number(pay_basic.value||0)+Number(pay_allow.value||0)-Number(pay_ded.value||0)}
+async function savePayroll(id=null){const allowances=Number(pay_allow.value||0);const body={employee_id:pay_emp.value,pay_month:pay_month.value,basic_salary:Number(pay_basic.value||0),allowances,deductions:Number(pay_ded.value||0)};await api(id?'PUT':'POST',id?`payroll/${id}`:'payroll',body);toast('Payroll saved to cloud');await refresh()}
+'''
+          s=s[:start]+payroll+s[end:]
+          p.write_text(s)
+          PY
+      - name: Commit UI changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html api/hrms.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Build automatic monthly payroll UI'
+          git push

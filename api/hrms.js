@@ -76,6 +76,10 @@ async function ensureSchema() {
     status TEXT NOT NULL DEFAULT 'Active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS leave_cycle_years NUMERIC(5,2) NOT NULL DEFAULT 2`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS last_leave_end_date DATE`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS next_leave_date DATE`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS planned_leave_days NUMERIC(5,2) NOT NULL DEFAULT 30`;
   await sql`CREATE TABLE IF NOT EXISTS attendance (
     id SERIAL PRIMARY KEY,
     employee_id TEXT NOT NULL,
@@ -146,7 +150,7 @@ async function ensureSchema() {
   )`;
   await sql`INSERT INTO settings(id, company) VALUES(1, 'FILTER CITY') ON CONFLICT(id) DO NOTHING`;
   await sql`INSERT INTO users(username,password_hash,role,active) VALUES('admin@company.com',${hash('Admin@12345')},'ADMIN',TRUE)
-    ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash, role='ADMIN', active=TRUE`;
+    ON CONFLICT(username) DO NOTHING`;
 }
 
 async function login(req, res) {
@@ -189,8 +193,8 @@ function adminOnly(user, res) {
 }
 
 async function createEmployee(body) {
-  const e = await sql`INSERT INTO employees(employee_id,full_name,mobile,national_id,nationality,joining_date,department,job_title,salary,bank_details,status)
-    VALUES(${body.employee_id},${body.full_name},${body.mobile||''},${body.national_id||''},${body.nationality||'Saudi'},${body.joining_date||null},${body.department||''},${body.job_title||''},${Number(body.salary||0)},${body.bank_details||''},${body.status||'Active'}) RETURNING *`;
+  const e = await sql`INSERT INTO employees(employee_id,full_name,mobile,national_id,nationality,joining_date,department,job_title,salary,bank_details,status,leave_cycle_years,last_leave_end_date,next_leave_date,planned_leave_days)
+    VALUES(${body.employee_id},${body.full_name},${body.mobile||''},${body.national_id||''},${body.nationality||'Saudi'},${body.joining_date||null},${body.department||''},${body.job_title||''},${Number(body.salary||0)},${body.bank_details||''},${body.status||'Active'},${Number(body.leave_cycle_years||2)},${body.last_leave_end_date||null},${body.next_leave_date||null},${Math.min(60,Math.max(30,Number(body.planned_leave_days||30)))}) RETURNING *`;
   if (body.username && body.password) {
     await sql`INSERT INTO users(username,password_hash,role,employee_id,active) VALUES(${body.username},${hash(body.password)},'EMPLOYEE',${body.employee_id},${body.status !== 'Inactive'})
       ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash, employee_id=EXCLUDED.employee_id, active=EXCLUDED.active`;
@@ -199,14 +203,27 @@ async function createEmployee(body) {
 }
 
 async function updateEmployee(id, body) {
-  const e = await sql`UPDATE employees SET full_name=${body.full_name},mobile=${body.mobile||''},national_id=${body.national_id||''},nationality=${body.nationality||'Saudi'},joining_date=${body.joining_date||null},department=${body.department||''},job_title=${body.job_title||''},salary=${Number(body.salary||0)},bank_details=${body.bank_details||''},status=${body.status||'Active'} WHERE id=${id} RETURNING *`;
+  const e = await sql`UPDATE employees SET full_name=${body.full_name},mobile=${body.mobile||''},national_id=${body.national_id||''},nationality=${body.nationality||'Saudi'},joining_date=${body.joining_date||null},department=${body.department||''},job_title=${body.job_title||''},salary=${Number(body.salary||0)},bank_details=${body.bank_details||''},status=${body.status||'Active'},leave_cycle_years=${Number(body.leave_cycle_years||2)},last_leave_end_date=${body.last_leave_end_date||null},next_leave_date=${body.next_leave_date||null},planned_leave_days=${Math.min(60,Math.max(30,Number(body.planned_leave_days||30)))} WHERE id=${id} RETURNING *`;
+  if (!e.length) return null;
   if (body.username) {
-    await sql`UPDATE users SET username=${body.username}, active=${body.status !== 'Inactive'} WHERE employee_id=${e[0]?.employee_id}`;
+    await sql`UPDATE users SET username=${body.username}, active=${body.status !== 'Inactive'} WHERE employee_id=${e[0].employee_id}`;
   }
-  if (body.password && e[0]) {
+  if (body.password) {
     await sql`UPDATE users SET password_hash=${hash(body.password)} WHERE employee_id=${e[0].employee_id}`;
   }
   return e[0];
+}
+
+async function changeAdminPassword(req, res, user) {
+  if (!adminOnly(user,res)) return;
+  const body = await getBody(req);
+  const currentPassword = String(body.current_password || '');
+  const newPassword = String(body.new_password || '');
+  if (newPassword.length < 8) return send(res,400,{error:'New password must be at least 8 characters'});
+  const rows = await sql`SELECT password_hash FROM users WHERE id=${Number(user.id)} AND role='ADMIN' LIMIT 1`;
+  if (!rows.length || rows[0].password_hash !== hash(currentPassword)) return send(res,400,{error:'Current password is incorrect'});
+  await sql`UPDATE users SET password_hash=${hash(newPassword)} WHERE id=${Number(user.id)} AND role='ADMIN'`;
+  return send(res,200,{ok:true});
 }
 
 async function handle(req, res) {
@@ -223,6 +240,7 @@ async function handle(req, res) {
   const user = auth(req);
   if (!user) return send(res, 401, { error:'Unauthorized' });
   if (req.method === 'GET' && path === 'data') return data(req, res);
+  if (req.method === 'POST' && path === 'auth/change-password') return changeAdminPassword(req,res,user);
 
   const body = ['POST','PUT'].includes(req.method) ? await getBody(req) : {};
   const parts = path.split('/').filter(Boolean);

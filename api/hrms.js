@@ -336,7 +336,7 @@ async function handle(req, res) {
       if (!empRows.length) return send(res,404,{error:'Employee not found'});
       const e=empRows[0];
       const basic=Number(body.basic_salary ?? e.salary ?? 0);
-      const allowances=Number(body.allowances ?? (Number(e.housing_allowance||0)+Number(e.transport_allowance||0)+Number(e.other_allowance||0));
+      const allowances=Number(body.allowances ?? (Number(e.housing_allowance||0)+Number(e.transport_allowance||0)+Number(e.other_allowance||0)));
       const deductions=Number(body.deductions||0);
       const row=await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${body.employee_id},${body.pay_month},${basic},${allowances},${deductions},${basic+allowances-deductions}) RETURNING *`;
       return send(res,201,{payroll:row[0]});

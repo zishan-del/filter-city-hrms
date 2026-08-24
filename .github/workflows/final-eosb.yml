@@ -1,0 +1,100 @@
+name: Final Saudi EOSB
+on:
+  push:
+    branches: [feature/automatic-payroll]
+    paths-ignore:
+      - .github/workflows/final-eosb.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[skip eosb]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/automatic-payroll
+      - name: Patch EOSB backend and UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('api/hrms.js')
+          s=p.read_text()
+          old=re.search(r"  if \(resource === 'eosb'\) \{.*?\n  \}\n\n  if \(resource === 'settings'\)",s,re.S)
+          if not old: raise SystemExit('EOSB backend block not found')
+          new=r'''  if (resource === 'eosb') {
+    if (!adminOnly(user,res)) return;
+    if (req.method === 'POST') {
+      const years=Math.max(0,Number(body.service_years||0));
+      const months=Math.max(0,Number(body.service_months||0));
+      const days=Math.max(0,Number(body.service_days||0));
+      const totalYears=years + months/12 + days/365;
+      const salary=Number(body.last_salary||0);
+      const base=salary * (totalYears <= 5 ? totalYears*0.5 : 2.5 + (totalYears-5));
+      const reason=String(body.termination_reason||'Other');
+      let factor=1;
+      if (reason === 'Resignation') {
+        if (totalYears < 2) factor=0;
+        else if (totalYears <= 5) factor=1/3;
+        else if (totalYears < 10) factor=2/3;
+      } else if (reason === 'Force majeure' || reason === 'Female worker - marriage' || reason === 'Female worker - childbirth') {
+        factor=1;
+      }
+      const benefit=base*factor;
+      const row=await sql`INSERT INTO eosb_records(employee_id,service_years,last_salary,benefit) VALUES(${body.employee_id},${totalYears},${salary},${benefit}) RETURNING *`;
+      return send(res,201,{eosb:row[0],base_benefit:base,factor,benefit});
+    }
+  }
+
+  if (resource === 'settings')'''
+          s=s[:old.start()]+new+s[old.end():]
+          p.write_text(s)
+
+          p=Path('index.html')
+          s=p.read_text()
+          marker='</script>'
+          if 'FINAL_SAUDI_EOSB_UI' not in s:
+            ui=r'''\n/* FINAL_SAUDI_EOSB_UI */
+<script>
+(function(){
+  const originalViewEOSB = viewEOSB;
+  window.__eosbCalc = function(salary,years,months,days,reason){
+    const y=Math.max(0,Number(years||0))+Math.max(0,Number(months||0))/12+Math.max(0,Number(days||0))/365;
+    const base=Number(salary||0)*(y<=5?y*0.5:2.5+(y-5));
+    let factor=1;
+    if(reason==='Resignation'){if(y<2)factor=0;else if(y<=5)factor=1/3;else if(y<10)factor=2/3;}
+    return {years:y,base,benefit:base*factor,factor};
+  };
+  window.viewEOSB=function(){
+    if(role!=='ADMIN')return '<div class="section"><div class="empty">EOSB is available to Admin.</div></div>';
+    const rows=state.employees.filter(e=>e.status==='Active');
+    const hist=state.eosb||[];
+    return `<div class="section"><div class="section-head"><b>Saudi EOSB Calculator</b><span class="badge">HRSD Article 84 / 85</span></div>
+      <div class="form-grid">
+        <div class="field"><label>Employee</label><select id="eosb_emp" onchange="eosbFill()"><option value="">Select employee</option>${rows.map(e=>`<option value="${esc(e.employee_id)}">${esc(e.full_name)} (${esc(e.employee_id)})</option>`).join('')}</select></div>
+        <div class="field"><label>Actual / Last Wage</label><input id="eosb_salary" type="number" step="0.01" value="0" oninput="eosbCalc()"></div>
+        <div class="field"><label>Termination Reason</label><select id="eosb_reason" onchange="eosbCalc()"><option>Other</option><option>Resignation</option><option>Force majeure</option><option>Female worker - marriage</option><option>Female worker - childbirth</option></select></div>
+        <div class="field"><label>Service Years</label><input id="eosb_years" type="number" min="0" step="1" value="0" oninput="eosbCalc()"></div>
+        <div class="field"><label>Service Months</label><input id="eosb_months" type="number" min="0" max="11" step="1" value="0" oninput="eosbCalc()"></div>
+        <div class="field"><label>Service Days</label><input id="eosb_days" type="number" min="0" max="30" step="1" value="0" oninput="eosbCalc()"></div>
+        <div class="field full"><div class="card"><b>Calculated EOSB</b><div class="stat" id="eosb_result">SAR 0.00</div><div class="muted" id="eosb_formula">First 5 years: ½ month per year; following years: 1 month per year.</div></div></div>
+        <div class="field full"><button onclick="saveEOSBFinal()">Save EOSB Record</button></div>
+      </div></div>
+      <div class="section"><div class="section-head"><b>EOSB History</b></div><div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Service</th><th>Last Wage</th><th>Benefit</th></tr></thead><tbody>${hist.map(x=>{const e=rows.find(a=>a.employee_id===x.employee_id);return `<tr><td>${esc(e?.full_name||x.employee_id)}</td><td>${Number(x.service_years||0).toFixed(2)} years</td><td>SAR ${Number(x.last_salary||0).toFixed(2)}</td><td>SAR ${Number(x.benefit||0).toFixed(2)}</td></tr>`}).join('')||'<tr><td colspan="4" class="empty">No EOSB records yet</td></tr>'}</tbody></table></div></div>`;
+  };
+  window.eosbFill=function(){const id=document.getElementById('eosb_emp').value,e=state.employees.find(x=>x.employee_id===id);if(e){document.getElementById('eosb_salary').value=Number(e.salary||0);const j=e.joining_date?new Date(e.joining_date):null;if(j){const n=new Date(),d=Math.max(0,n-j),days=Math.floor(d/86400000),y=Math.floor(days/365.2425),m=Math.floor((days-y*365.2425)/30.436875);document.getElementById('eosb_years').value=y;document.getElementById('eosb_months').value=Math.min(11,m);document.getElementById('eosb_days').value=0;}}eosbCalc();};
+  window.eosbCalc=function(){const c=__eosbCalc(document.getElementById('eosb_salary').value,document.getElementById('eosb_years').value,document.getElementById('eosb_months').value,document.getElementById('eosb_days').value,document.getElementById('eosb_reason').value);document.getElementById('eosb_result').textContent='SAR '+c.benefit.toFixed(2);document.getElementById('eosb_formula').textContent='Base: SAR '+c.base.toFixed(2)+' × '+c.factor+' entitlement factor';return c;};
+  window.saveEOSBFinal=async function(){const c=eosbCalc(),id=document.getElementById('eosb_emp').value;if(!id)return toast('Select employee');const r=await fetch(API+'/eosb',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem(tokenKey)},body:JSON.stringify({employee_id:id,last_salary:Number(document.getElementById('eosb_salary').value||0),service_years:Number(document.getElementById('eosb_years').value||0),service_months:Number(document.getElementById('eosb_months').value||0),service_days:Number(document.getElementById('eosb_days').value||0),termination_reason:document.getElementById('eosb_reason').value})});const d=await r.json();if(!r.ok)return toast(d.error||'Could not save EOSB');await refresh();toast('EOSB saved');};
+})();
+</script>\n'''
+            s=s.replace(marker,ui+marker)
+            p.write_text(s)
+          PY
+      - name: Commit final EOSB
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api/hrms.js index.html
+          git diff --cached --quiet || (git commit -m 'Implement final Saudi EOSB rules [skip eosb]' && git push origin HEAD:feature/automatic-payroll)

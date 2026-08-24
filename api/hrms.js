@@ -139,6 +139,7 @@ async function ensureSchema() {
     net_salary NUMERIC(14,2) DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`;
+  await sql`ALTER TABLE payroll ADD COLUMN IF NOT EXISTS manual_override BOOLEAN NOT NULL DEFAULT FALSE`;
   await sql`CREATE TABLE IF NOT EXISTS eosb_records (
     id SERIAL PRIMARY KEY,
     employee_id TEXT NOT NULL,
@@ -177,12 +178,18 @@ async function ensureCurrentPayroll() {
   const month = new Date().toISOString().slice(0,7);
   const employees = await sql`SELECT employee_id,salary,housing_allowance,transport_allowance,other_allowance,status FROM employees WHERE status='Active' ORDER BY employee_id`;
   for (const e of employees) {
-    const existing = await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;
-    if (existing.length) continue;
     const basic = Number(e.salary || 0);
     const allowances = Number(e.housing_allowance || 0) + Number(e.transport_allowance || 0) + Number(e.other_allowance || 0);
-    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary)
-      VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;
+    const existing = await sql`SELECT id,deductions,manual_override FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;
+    if (existing.length) {
+      if (!existing[0].manual_override) {
+        const deductions = Number(existing[0].deductions || 0);
+        await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},net_salary=${basic+allowances-deductions} WHERE id=${existing[0].id}`;
+      }
+      continue;
+    }
+    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary,manual_override)
+      VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances},FALSE)`;
   }
 }
 
@@ -343,7 +350,7 @@ async function handle(req, res) {
     }
     if (req.method === 'PUT' && id) {
       const basic=Number(body.basic_salary||0), allowances=Number(body.allowances||0), deductions=Number(body.deductions||0);
-      const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions} WHERE id=${id} RETURNING *`;
+      const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions},manual_override=TRUE WHERE id=${id} RETURNING *`;
       return send(res,200,{payroll:row[0]});
     }
   }

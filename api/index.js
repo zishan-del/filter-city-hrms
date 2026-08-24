@@ -1,7 +1,10 @@
 const { neon } = require('@neondatabase/serverless');
 
+const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL_UNPOOLED;
+if (databaseUrl && !process.env.DATABASE_URL) process.env.DATABASE_URL = databaseUrl;
+
 const handler = require('./hrms.js');
-const sql = neon(process.env.DATABASE_URL);
+const sql = databaseUrl ? neon(databaseUrl) : null;
 
 function decodeToken(token) {
   try { return JSON.parse(Buffer.from(token, 'base64url').toString('utf8')); } catch (_) { return null; }
@@ -18,16 +21,15 @@ function makeEmployeeAwareToken(decoded, employeeId) {
 
 module.exports = async (req, res) => {
   try {
+    if (!databaseUrl) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      return res.end(JSON.stringify({ error: 'Database connection is not configured for this Vercel environment.' }));
+    }
     const incoming = new URL(req.url || '/api/index', 'http://localhost');
     const path = incoming.searchParams.get('path');
-    if (path) {
-      req.url = '/api/' + path.replace(/^\/+/, '');
-    }
+    if (path) req.url = '/api/' + path.replace(/^\/+/, '');
 
-    // The original employee login token predates the employee_id claim.
-    // Before employee-only API calls reach hrms.js, enrich that token from
-    // the users table. This keeps attendance and leave tied to the logged-in
-    // employee without changing the existing database or frontend behavior.
     const cleanPath = (req.url || '').split('?')[0].replace(/^\/api\/?/, '').replace(/\/$/, '');
     const authHeader = req.headers.authorization || '';
     if (authHeader && cleanPath !== 'auth/login') {
@@ -35,12 +37,9 @@ module.exports = async (req, res) => {
       const decoded = decodeToken(token);
       if (decoded && decoded.id && decoded.role === 'EMPLOYEE' && !decoded.employee_id) {
         const rows = await sql`SELECT employee_id FROM users WHERE id=${Number(decoded.id)} AND role='EMPLOYEE' LIMIT 1`;
-        if (rows.length && rows[0].employee_id) {
-          req.headers.authorization = 'Bearer ' + makeEmployeeAwareToken(decoded, rows[0].employee_id);
-        }
+        if (rows.length && rows[0].employee_id) req.headers.authorization = 'Bearer ' + makeEmployeeAwareToken(decoded, rows[0].employee_id);
       }
     }
-
     return handler(req, res);
   } catch (error) {
     res.statusCode = 500;

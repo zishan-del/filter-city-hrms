@@ -1,0 +1,85 @@
+name: Finalize Saudi EOSB
+on:
+  push:
+    branches: [feature/automatic-payroll]
+    paths-ignore:
+      - .github/workflows/finalize-eosb.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[skip eosb fix]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/automatic-payroll
+          fetch-depth: 1
+      - name: Patch EOSB API
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('api/hrms.js')
+          s=p.read_text()
+          schema="""  await sql`CREATE TABLE IF NOT EXISTS eosb_records (
+    id SERIAL PRIMARY KEY,
+    employee_id TEXT NOT NULL,
+    service_years NUMERIC(8,2) DEFAULT 0,
+    last_salary NUMERIC(14,2) DEFAULT 0,
+    benefit NUMERIC(14,2) DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`;
+  await sql`ALTER TABLE eosb_records ADD COLUMN IF NOT EXISTS service_months NUMERIC(5,2) NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE eosb_records ADD COLUMN IF NOT EXISTS service_days NUMERIC(5,2) NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE eosb_records ADD COLUMN IF NOT EXISTS termination_reason TEXT NOT NULL DEFAULT 'Contract ended'`;"""
+          old_schema="""  await sql`CREATE TABLE IF NOT EXISTS eosb_records (
+    id SERIAL PRIMARY KEY,
+    employee_id TEXT NOT NULL,
+    service_years NUMERIC(8,2) DEFAULT 0,
+    last_salary NUMERIC(14,2) DEFAULT 0,
+    benefit NUMERIC(14,2) DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`;"""
+          if old_schema in s and 'service_months NUMERIC(5,2)' not in s:
+            s=s.replace(old_schema,schema,1)
+          old="""  if (resource === 'eosb') {
+    if (!adminOnly(user,res)) return;
+    if (req.method === 'POST') {
+      const years=Number(body.service_years||0), salary=Number(body.last_salary||0);
+      const benefit=salary * (years <= 5 ? years*0.5 : 2.5 + (years-5));
+      const row=await sql`INSERT INTO eosb_records(employee_id,service_years,last_salary,benefit) VALUES(${body.employee_id},${years},${salary},${benefit}) RETURNING *`;
+      return send(res,201,{eosb:row[0]});
+    }
+  }"""
+          new="""  if (resource === 'eosb') {
+    if (!adminOnly(user,res)) return;
+    if (req.method === 'POST') {
+      let salary=Number(body.last_salary||0);
+      if (body.employee_id && !salary) {
+        const er=await sql`SELECT salary,housing_allowance,transport_allowance,other_allowance FROM employees WHERE employee_id=${body.employee_id} LIMIT 1`;
+        if (er.length) salary=Number(er[0].salary||0)+Number(er[0].housing_allowance||0)+Number(er[0].transport_allowance||0)+Number(er[0].other_allowance||0);
+      }
+      const years=Number(body.service_years||0), months=Number(body.service_months||0), days=Number(body.service_days||0);
+      const totalYears=Math.max(0,years+months/12+days/360);
+      let benefit=salary*(Math.min(totalYears,5)*0.5+Math.max(totalYears-5,0));
+      const reason=String(body.termination_reason||'Contract ended').toLowerCase();
+      if(reason.includes('resign')) {
+        if(totalYears<2) benefit=0;
+        else if(totalYears<5) benefit/=3;
+        else if(totalYears<10) benefit*=2/3;
+      }
+      const row=await sql`INSERT INTO eosb_records(employee_id,service_years,service_months,service_days,last_salary,benefit,termination_reason) VALUES(${body.employee_id},${totalYears},${months},${days},${salary},${benefit},${body.termination_reason||'Contract ended'}) RETURNING *`;
+      return send(res,201,{eosb:row[0],calculation:{lastWage:salary,serviceYears:totalYears,benefit}});
+    }
+  }"""
+          if old not in s:
+            raise SystemExit('EOSB block not found; aborting without changes')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api/hrms.js
+          git diff --cached --quiet || (git commit -m 'Finalize Saudi EOSB rules [skip eosb fix]' && git push origin HEAD:feature/automatic-payroll)

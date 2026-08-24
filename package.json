@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node dev-server.js",
     "start": "node dev-server.js",
-    "vercel-build": "node -e \"console.log('FILTER CITY HRMS: static frontend + Vercel API ready')\""
+    "vercel-build": "node build-fix-payroll.js && node -e \"console.log('FILTER CITY HRMS: static frontend + Vercel API ready')\""
   },
   "engines": {
     "node": ">=20"

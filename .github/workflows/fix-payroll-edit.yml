@@ -1,0 +1,52 @@
+name: Fix payroll edit
+on:
+  push:
+    branches: [feature/automatic-payroll]
+    paths-ignore:
+      - .github/workflows/fix-payroll-edit.yml
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: "!contains(github.event.head_commit.message, '[skip payroll fix]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/automatic-payroll
+      - name: Patch payroll persistence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('api/hrms.js')
+          s=p.read_text()
+          old="""const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions} WHERE id=${id} RETURNING *`;
+      return send(res,200,{payroll:row[0]});"""
+          new="""const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions} WHERE id=${id} RETURNING *`;
+      if (!row.length) return send(res,404,{error:'Payroll record not found'});
+      return send(res,200,{payroll:row[0]});"""
+          if old not in s: raise SystemExit('payroll PUT block not found')
+          s=s.replace(old,new,1)
+          old2="""if (body.password) {
+    await sql`UPDATE users SET password_hash=${hash(body.password)} WHERE employee_id=${e[0].employee_id}`;
+  }
+  return e[0];"""
+          new2="""if (body.password) {
+    await sql`UPDATE users SET password_hash=${hash(body.password)} WHERE employee_id=${e[0].employee_id}`;
+  }
+  const month = new Date().toISOString().slice(0,7);
+  const basic = Number(e[0].salary || 0);
+  const allowances = Number(e[0].housing_allowance || 0) + Number(e[0].transport_allowance || 0) + Number(e[0].other_allowance || 0);
+  await sql`UPDATE payroll SET basic_salary=${basic}, allowances=${allowances}, net_salary=${basic + allowances - Number(deductions || 0)} WHERE employee_id=${e[0].employee_id} AND pay_month=${month}`;
+  return e[0];"""
+          if old2 not in s: raise SystemExit('employee update block not found')
+          s=s.replace(old2,new2,1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api/hrms.js
+          git diff --cached --quiet || (git commit -m 'Fix payroll edit persistence [skip payroll fix]' && git push origin HEAD:feature/automatic-payroll)

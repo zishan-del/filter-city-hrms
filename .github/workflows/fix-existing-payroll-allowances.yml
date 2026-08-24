@@ -1,0 +1,49 @@
+name: Fix existing payroll allowances
+on:
+  push:
+    branches: [feature/automatic-payroll]
+    paths-ignore:
+      - .github/workflows/fix-existing-payroll-allowances.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[skip payroll allowance sync]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/automatic-payroll
+      - name: Patch automatic payroll sync
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('api/hrms.js')
+          s=p.read_text()
+          old="""    const existing = await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;
+    if (existing.length) continue;
+    const basic = Number(e.salary || 0);
+    const allowances = Number(e.housing_allowance || 0) + Number(e.transport_allowance || 0) + Number(e.other_allowance || 0);
+    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary)
+      VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;"""
+          new="""    const existing = await sql`SELECT id,deductions FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;
+    const basic = Number(e.salary || 0);
+    const allowances = Number(e.housing_allowance || 0) + Number(e.transport_allowance || 0) + Number(e.other_allowance || 0);
+    if (existing.length) {
+      const deductions = Number(existing[0].deductions || 0);
+      await sql`UPDATE payroll SET basic_salary=${basic}, allowances=${allowances}, net_salary=${basic+allowances-deductions} WHERE id=${existing[0].id}`;
+      continue;
+    }
+    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary)
+      VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;"""
+          if old not in s:
+              raise SystemExit('ensureCurrentPayroll block not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api/hrms.js
+          git diff --cached --quiet || (git commit -m 'Sync existing payroll allowances [skip payroll allowance sync]' && git push origin HEAD:feature/automatic-payroll)

@@ -1,0 +1,54 @@
+name: Fix existing payroll allowance sync
+on:
+  push:
+    branches: [feature/automatic-payroll]
+    paths-ignore:
+      - .github/workflows/fix-payroll-existing.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[skip payroll allowance sync]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/automatic-payroll
+          fetch-depth: 0
+      - name: Patch API
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('api/hrms.js')
+          s = p.read_text()
+
+          # Add a manual override flag so automatic sync does not overwrite payroll edits.
+          marker = "  await sql`CREATE TABLE IF NOT EXISTS payroll ("
+          if marker not in s:
+              raise SystemExit('payroll schema marker not found')
+          if 'ALTER TABLE payroll ADD COLUMN IF NOT EXISTS manual_override' not in s:
+              anchor = "  await sql`CREATE TABLE IF NOT EXISTS eosb_records ("
+              s = s.replace(anchor, "  await sql`ALTER TABLE payroll ADD COLUMN IF NOT EXISTS manual_override BOOLEAN NOT NULL DEFAULT FALSE`;\n" + anchor, 1)
+
+          old_sync = '''  for (const e of employees) {\n    const existing = await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;\n    if (existing.length) continue;\n    const basic = Number(e.salary || 0);\n    const allowances = Number(e.housing_allowance || 0) + Number(e.transport_allowance || 0) + Number(e.other_allowance || 0);\n    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary)\n      VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;\n  }'''
+          new_sync = '''  for (const e of employees) {\n    const basic = Number(e.salary || 0);\n    const allowances = Number(e.housing_allowance || 0) + Number(e.transport_allowance || 0) + Number(e.other_allowance || 0);\n    const existing = await sql`SELECT id,deductions,manual_override FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;\n    if (existing.length) {\n      if (!existing[0].manual_override) {\n        const deductions = Number(existing[0].deductions || 0);\n        await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},net_salary=${basic+allowances-deductions} WHERE id=${existing[0].id}`;\n      }\n      continue;\n    }\n    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary,manual_override)\n      VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances},FALSE)`;\n  }'''
+          if old_sync not in s:
+              raise SystemExit('ensureCurrentPayroll block not found')
+          s = s.replace(old_sync, new_sync, 1)
+
+          old_put = """      const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions} WHERE id=${id} RETURNING *`;"""
+          new_put = """      const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions},manual_override=TRUE WHERE id=${id} RETURNING *`;"""
+          if old_put not in s:
+              raise SystemExit('payroll PUT line not found')
+          s = s.replace(old_put, new_put, 1)
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api/hrms.js
+          git diff --cached --quiet || (git commit -m 'Sync allowances for existing payroll rows [skip payroll allowance sync]' && git push origin HEAD:feature/automatic-payroll)

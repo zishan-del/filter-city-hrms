@@ -17,10 +17,6 @@
   },
   "rewrites": [
     {
-      "source": "/api/data",
-      "destination": "/api/data"
-    },
-    {
       "source": "/api/:path*",
       "destination": "/api/index?path=:path*"
     }

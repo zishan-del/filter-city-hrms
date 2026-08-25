@@ -1,4 +1,6 @@
 const { neon } = require('@neondatabase/serverless');
+const fs = require('fs');
+const path = require('path');
 
 const handler = require('./hrms.js');
 const sql = neon(process.env.DATABASE_URL);
@@ -16,12 +18,23 @@ function makeEmployeeAwareToken(decoded, employeeId) {
   })).toString('base64url');
 }
 
+function sendAppShell(res) {
+  const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
+  const ui = fs.readFileSync(path.join(process.cwd(), 'task-photo-ui.js'), 'utf8');
+  const injected = html.replace('</body>', `<script>\n${ui}\n</script>\n</body>`);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.end(injected);
+}
+
 module.exports = async (req, res) => {
   try {
     const incoming = new URL(req.url || '/api/index', 'http://localhost');
-    const path = incoming.searchParams.get('path');
-    if (path) {
-      req.url = '/api/' + path.replace(/^\/+/, '');
+    const pathParam = incoming.searchParams.get('path');
+    if (pathParam === '__app__') return sendAppShell(res);
+    if (pathParam) {
+      req.url = '/api/' + pathParam.replace(/^\/+/, '');
     }
 
     // The original employee login token predates the employee_id claim.

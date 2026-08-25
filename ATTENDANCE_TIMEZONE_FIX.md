@@ -1,0 +1,1 @@
+Stable attendance timezone fix: attendance dates and check-in/check-out timestamps must use Asia/Riyadh (UTC+03:00), independent of browser or server timezone.

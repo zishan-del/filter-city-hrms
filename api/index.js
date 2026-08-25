@@ -29,7 +29,8 @@ function sendAppShell(res) {
   const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
   const ui = fs.readFileSync(path.join(process.cwd(), 'task-photo-ui.js'), 'utf8');
   const leaveReasonUi = fs.readFileSync(path.join(process.cwd(), 'leave-reason-ui.js'), 'utf8');
-  const injected = html.replace('</body>', `<script>\n${ui}\n</script>\n<script>\n${leaveReasonUi}\n</script>\n</body>`);
+  const payrollUi = fs.readFileSync(path.join(process.cwd(), 'payroll-ui.js'), 'utf8');
+  const injected = html.replace('</body>', `<script>\n${ui}\n</script>\n<script>\n${leaveReasonUi}\n</script>\n<script>\n${payrollUi}\n</script>\n</body>`);
   res.statusCode = 200;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -68,6 +69,11 @@ function riyadhDate() {
 function riyadhDateTime() {
   const p = riyadhNowParts();
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+function riyadhMonth() {
+  const p = riyadhNowParts();
+  return `${p.year}-${p.month}`;
 }
 
 async function ensureAttendanceTimezone() {
@@ -119,6 +125,50 @@ async function handleTaskPhoto(req, res, taskId, decoded) {
   return sendJson(res, 200, { task: row[0] });
 }
 
+async function ensurePayrollSchema() {
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS payroll_allowances NUMERIC(14,2) NOT NULL DEFAULT 0`;
+}
+
+async function handlePayrollSync(req, res, decoded) {
+  if (!decoded || decoded.role !== 'ADMIN') return sendJson(res, 403, { error: 'Admin access required' });
+  const body = req.method === 'POST' ? await readJson(req) : {};
+  await ensurePayrollSchema();
+  const month = String(body.pay_month || riyadhMonth()).slice(0,7);
+  const employees = await sql`SELECT employee_id,salary,payroll_allowances,status FROM employees WHERE status='Active' ORDER BY id`;
+  for (const e of employees) {
+    const existing = await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;
+    if (!existing.length) {
+      const basic = Number(e.salary || 0);
+      const allowances = Number(e.payroll_allowances || 0);
+      await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;
+    }
+  }
+  const rows = await sql`SELECT * FROM payroll WHERE pay_month=${month} ORDER BY id DESC`;
+  return sendJson(res, 200, { pay_month: month, payroll: rows });
+}
+
+async function handleEmployeePayrollDefault(req, res, decoded) {
+  if (!decoded || decoded.role !== 'ADMIN') return sendJson(res, 403, { error: 'Admin access required' });
+  const body = await readJson(req);
+  await ensurePayrollSchema();
+  const employeeId = String(body.employee_id || '').trim();
+  if (!employeeId) return sendJson(res, 400, { error: 'Employee ID required' });
+  const allowance = Math.max(0, Number(body.allowances || 0));
+  const month = String(body.pay_month || riyadhMonth()).slice(0,7);
+  const employees = await sql`SELECT employee_id,salary FROM employees WHERE employee_id=${employeeId} LIMIT 1`;
+  if (!employees.length) return sendJson(res, 404, { error: 'Employee not found' });
+  await sql`UPDATE employees SET payroll_allowances=${allowance} WHERE employee_id=${employeeId}`;
+  const basic = Number(employees[0].salary || 0);
+  const existing = await sql`SELECT id,deductions FROM payroll WHERE employee_id=${employeeId} AND pay_month=${month} LIMIT 1`;
+  if (existing.length) {
+    const deductions = Number(existing[0].deductions || 0);
+    const row = await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowance},net_salary=${basic+allowance-deductions} WHERE id=${existing[0].id} RETURNING *`;
+    return sendJson(res, 200, { payroll: row[0] });
+  }
+  const row = await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${employeeId},${month},${basic},${allowance},0,${basic+allowance}) RETURNING *`;
+  return sendJson(res, 201, { payroll: row[0] });
+}
+
 module.exports = async (req, res) => {
   try {
     const incoming = new URL(req.url || '/api/index', 'http://localhost');
@@ -143,6 +193,8 @@ module.exports = async (req, res) => {
     if (cleanPath.startsWith('task-photo/') && (req.method === 'PUT' || req.method === 'DELETE')) {
       return handleTaskPhoto(req, res, cleanPath.split('/')[1], decoded);
     }
+    if (cleanPath === 'payroll/sync' && req.method === 'POST') return handlePayrollSync(req, res, decoded);
+    if (cleanPath === 'employee-payroll-default' && req.method === 'POST') return handleEmployeePayrollDefault(req, res, decoded);
 
     return handler(req, res);
   } catch (error) {

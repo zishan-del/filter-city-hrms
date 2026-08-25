@@ -18,6 +18,13 @@ function makeEmployeeAwareToken(decoded, employeeId) {
   })).toString('base64url');
 }
 
+function sendJson(res, status, body) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.end(JSON.stringify(body));
+}
+
 function sendAppShell(res) {
   const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
   const ui = fs.readFileSync(path.join(process.cwd(), 'task-photo-ui.js'), 'utf8');
@@ -40,41 +47,75 @@ async function readJson(req) {
   });
 }
 
+function riyadhNowParts() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date());
+  const out = {};
+  for (const p of parts) if (p.type !== 'literal') out[p.type] = p.value;
+  return out;
+}
+
+function riyadhDate() {
+  const p = riyadhNowParts();
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function riyadhDateTime() {
+  const p = riyadhNowParts();
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+async function ensureAttendanceTimezone() {
+  const cols = await sql`SELECT column_name,data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='attendance' AND column_name IN ('check_in','check_out')`;
+  const types = Object.fromEntries(cols.map(c => [c.column_name, c.data_type]));
+  if (types.check_in === 'timestamp with time zone') {
+    await sql`ALTER TABLE attendance ALTER COLUMN check_in TYPE TEXT USING CASE WHEN check_in IS NULL THEN NULL ELSE to_char(check_in AT TIME ZONE 'Asia/Riyadh','YYYY-MM-DD HH24:MI:SS') END`;
+  }
+  if (types.check_out === 'timestamp with time zone') {
+    await sql`ALTER TABLE attendance ALTER COLUMN check_out TYPE TEXT USING CASE WHEN check_out IS NULL THEN NULL ELSE to_char(check_out AT TIME ZONE 'Asia/Riyadh','YYYY-MM-DD HH24:MI:SS') END`;
+  }
+}
+
+async function handleAttendance(req, res, decoded) {
+  if (!decoded || !decoded.id || !decoded.exp || decoded.exp < Date.now()) return sendJson(res, 401, { error: 'Unauthorized' });
+  await ensureAttendanceTimezone();
+  const body = req.method === 'POST' ? await readJson(req) : {};
+  const employeeId = decoded.role === 'EMPLOYEE' ? decoded.employee_id : String(body.employee_id || '').trim();
+  if (!employeeId) return sendJson(res, 400, { error: 'Employee ID required' });
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
+
+  const today = String(body.work_date || riyadhDate()).slice(0, 10);
+  const existing = await sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND work_date=${today} LIMIT 1`;
+
+  if (body.action === 'checkout') {
+    if (!existing.length) return sendJson(res, 400, { error: 'Check in first' });
+    const row = await sql`UPDATE attendance SET check_out=${riyadhDateTime()},status='Present' WHERE id=${existing[0].id} RETURNING *`;
+    return sendJson(res, 200, { attendance: row[0] });
+  }
+
+  if (existing.length) return sendJson(res, 200, { attendance: existing[0] });
+  const row = await sql`INSERT INTO attendance(employee_id,work_date,check_in,latitude,longitude,status) VALUES(${employeeId},${today},${riyadhDateTime()},${body.latitude||null},${body.longitude||null},'Present') RETURNING *`;
+  return sendJson(res, 201, { attendance: row[0] });
+}
+
 async function handleTaskPhoto(req, res, taskId, decoded) {
   if (!decoded || !decoded.id || !decoded.exp || decoded.exp < Date.now()) {
-    res.statusCode = 401;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    return sendJson(res, 401, { error: 'Unauthorized' });
   }
   const id = Number(taskId);
-  if (!id) {
-    res.statusCode = 400;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.end(JSON.stringify({ error: 'Task ID required' }));
-  }
+  if (!id) return sendJson(res, 400, { error: 'Task ID required' });
   const taskRows = await sql`SELECT id, employee_id FROM tasks WHERE id=${id} LIMIT 1`;
-  if (!taskRows.length) {
-    res.statusCode = 404;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.end(JSON.stringify({ error: 'Task not found' }));
-  }
-  if (decoded.role !== 'ADMIN' && taskRows[0].employee_id !== decoded.employee_id) {
-    res.statusCode = 403;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.end(JSON.stringify({ error: 'This task is not assigned to you' }));
-  }
+  if (!taskRows.length) return sendJson(res, 404, { error: 'Task not found' });
+  if (decoded.role !== 'ADMIN' && taskRows[0].employee_id !== decoded.employee_id) return sendJson(res, 403, { error: 'This task is not assigned to you' });
   const body = await readJson(req);
   const photo = body.photo_data ? String(body.photo_data) : null;
-  if (photo && photo.length > 700000) {
-    res.statusCode = 400;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.end(JSON.stringify({ error: 'Photo is too large. Please use a smaller photo.' }));
-  }
+  if (photo && photo.length > 700000) return sendJson(res, 400, { error: 'Photo is too large. Please use a smaller photo.' });
   const row = await sql`UPDATE tasks SET photo_data=${photo}, updated_at=NOW() WHERE id=${id} RETURNING *`;
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store, max-age=0');
-  return res.end(JSON.stringify({ task: row[0] }));
+  return sendJson(res, 200, { task: row[0] });
 }
 
 module.exports = async (req, res) => {
@@ -82,36 +123,29 @@ module.exports = async (req, res) => {
     const incoming = new URL(req.url || '/api/index', 'http://localhost');
     const pathParam = incoming.searchParams.get('path');
     if (pathParam === '__app__') return sendAppShell(res);
-    if (pathParam) {
-      req.url = '/api/' + pathParam.replace(/^\/+/, '');
-    }
+    if (pathParam) req.url = '/api/' + pathParam.replace(/^\/+/, '');
 
     const cleanPath = (req.url || '').split('?')[0].replace(/^\/api\/?/, '').replace(/\/$/, '');
     const authHeader = req.headers.authorization || '';
     const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const decoded = decodeToken(rawToken);
+    let decoded = decodeToken(rawToken);
 
+    if (authHeader && cleanPath !== 'auth/login' && decoded && decoded.id && decoded.role === 'EMPLOYEE' && !decoded.employee_id) {
+      const rows = await sql`SELECT employee_id FROM users WHERE id=${Number(decoded.id)} AND role='EMPLOYEE' LIMIT 1`;
+      if (rows.length && rows[0].employee_id) {
+        decoded = { ...decoded, employee_id: rows[0].employee_id };
+        req.headers.authorization = 'Bearer ' + makeEmployeeAwareToken(decoded, rows[0].employee_id);
+      }
+    }
+
+    if (cleanPath === 'attendance') return handleAttendance(req, res, decoded);
     if (cleanPath.startsWith('task-photo/') && (req.method === 'PUT' || req.method === 'DELETE')) {
       return handleTaskPhoto(req, res, cleanPath.split('/')[1], decoded);
     }
 
-    // The original employee login token predates the employee_id claim.
-    // Before employee-only API calls reach hrms.js, enrich that token from
-    // the users table. This keeps attendance and leave tied to the logged-in
-    // employee without changing the existing database or frontend behavior.
-    if (authHeader && cleanPath !== 'auth/login') {
-      if (decoded && decoded.id && decoded.role === 'EMPLOYEE' && !decoded.employee_id) {
-        const rows = await sql`SELECT employee_id FROM users WHERE id=${Number(decoded.id)} AND role='EMPLOYEE' LIMIT 1`;
-        if (rows.length && rows[0].employee_id) {
-          req.headers.authorization = 'Bearer ' + makeEmployeeAwareToken(decoded, rows[0].employee_id);
-        }
-      }
-    }
-
     return handler(req, res);
   } catch (error) {
-    res.statusCode = 500;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: error.message || 'API routing error' }));
+    console.error(error);
+    sendJson(res, 500, { error: error.message || 'API routing error' });
   }
 };

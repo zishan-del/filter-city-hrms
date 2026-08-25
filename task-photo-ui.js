@@ -29,6 +29,7 @@
       <div class="field"><label>Start time</label><input id="fc_task_start" type="time" value="${escTask(taskTime(task.start_time))}"></div>
       <div class="field"><label>Deadline</label><input id="fc_task_deadline" type="time" value="${escTask(taskTime(task.deadline_time))}"></div>
       <div class="field full"><label>Description</label><textarea id="fc_task_description" rows="5">${escTask(task.description||'')}</textarea></div>
+      <div class="field full"><label>Task Photo</label><div>${photoThumb(task.photo_data,task.title)}<div style="margin-top:8px"><input id="fc_task_photo" type="file" accept="image/*"><div class="muted" style="font-size:12px;margin-top:5px">Optional. You can upload or replace the photo here. Photos are compressed before cloud storage.</div>${task.photo_data?'<div class="actions" style="margin-top:7px"><button class="danger" onclick="fcDeleteAdminPhoto('+task.id+')">Delete Photo</button></div>':''}</div></div></div>
       <div class="full"><button onclick="fcSaveTask()">${task.id?'Save Changes':'Assign Task'}</button></div>
     </div></div>`;
   };
@@ -37,7 +38,10 @@
       const id=document.getElementById('fc_task_id').value;
       const body={employee_id:document.getElementById('fc_task_employee').value,title:document.getElementById('fc_task_title').value.trim(),priority:document.getElementById('fc_task_priority').value,task_date:document.getElementById('fc_task_date').value||null,start_time:document.getElementById('fc_task_start').value||null,deadline_time:document.getElementById('fc_task_deadline').value||null,description:document.getElementById('fc_task_description').value};
       if(!body.title) return toast('Task title is required');
-      await taskApi(id?'PUT':'POST', id?`tasks/${id}`:'tasks', body);
+      const result=await taskApi(id?'PUT':'POST', id?`tasks/${id}`:'tasks', body);
+      const taskId=id||result.task?.id;
+      const input=document.getElementById('fc_task_photo');
+      if(taskId && input && input.files.length){const photo=await compressPhoto(input.files[0]);await taskApi('PUT',`task-photo/${taskId}`,{photo_data:photo});}
       toast(id?'Task updated':'Task assigned');
       await refresh();
     }catch(e){toast(e.message)}
@@ -61,14 +65,18 @@
     if(out.length>700000) throw Error('Photo is too large. Please choose a smaller image.');
     return out;
   }
+  window.fcDeleteAdminPhoto = async function(id){
+    if(!confirm('Delete this task photo?')) return;
+    try{await taskApi('DELETE',`task-photo/${id}`);toast('Photo deleted');await refresh()}catch(e){toast(e.message)}
+  };
   window.fcUploadPhoto = async function(id){
     const input=document.getElementById('fc_photo_'+id);
     if(!input || !input.files.length) return toast('Choose a photo first');
-    try{const photo=await compressPhoto(input.files[0]);await taskApi('PUT',`tasks/${id}`,{photo_data:photo});toast('Photo saved');await refresh()}catch(e){toast(e.message)}
+    try{const photo=await compressPhoto(input.files[0]);await taskApi('PUT',`task-photo/${id}`,{photo_data:photo});toast('Photo saved');await refresh()}catch(e){toast(e.message)}
   };
   window.fcDeletePhoto = async function(id){
     if(!confirm('Delete the employee photo from this task?')) return;
-    try{const t=(state.tasks||[]).find(x=>x.id===id);await taskApi('PUT',`tasks/${id}`,{status:t?.status||'Pending',photo_data:''});toast('Photo deleted');await refresh()}catch(e){toast(e.message)}
+    try{await taskApi('DELETE',`task-photo/${id}`);toast('Photo deleted');await refresh()}catch(e){toast(e.message)}
   };
   window.fcSaveEmployeeTask = async function(id){
     const status=document.getElementById('fc_status_'+id).value;
@@ -80,6 +88,5 @@
     if(role==='ADMIN') return `<div class="section"><div class="section-head"><b>Tasks</b><button onclick="fcTaskForm()">+ Assign Task</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Task</th><th>Date</th><th>Priority</th><th>Status</th><th>Photo</th><th>Actions</th></tr></thead><tbody>${rows.length?rows.map(t=>`<tr><td>${escTask(employeeName(t.employee_id))}</td><td><b>${escTask(t.title)}</b><div class="muted" style="max-width:260px;white-space:normal">${escTask(t.description||'')}</div></td><td>${escTask(taskDate(t.task_date))||'—'}<br>${escTask(taskTime(t.start_time))}${t.deadline_time?' – '+escTask(taskTime(t.deadline_time)):''}</td><td><span class="badge">${escTask(t.priority||'Normal')}</span></td><td><span class="badge">${escTask(t.status||'Pending')}</span></td><td>${photoThumb(t.photo_data,t.title)}</td><td><div class="actions"><button onclick='fcTaskForm(${JSON.stringify(t)})'>Edit</button><button class="danger" onclick="fcDeleteTask(${t.id})">Delete</button></div></td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">No tasks yet.</div></td></tr>`}</tbody></table></div></div>`;
     return `<div class="section"><div class="section-head"><b>My Tasks</b><span class="badge">Employee</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Task</th><th>Date</th><th>Priority</th><th>Status</th><th>Employee Photo</th><th>Save</th></tr></thead><tbody>${rows.length?rows.map(t=>`<tr><td><b>${escTask(t.title)}</b><div class="muted" style="max-width:330px;white-space:normal">${escTask(t.description||'')}</div></td><td>${escTask(taskDate(t.task_date))||'—'}<br>${escTask(taskTime(t.start_time))}${t.deadline_time?' – '+escTask(taskTime(t.deadline_time)):''}</td><td><span class="badge">${escTask(t.priority||'Normal')}</span></td><td><select id="fc_status_${t.id}"><option ${t.status==='Pending'?'selected':''}>Pending</option><option ${t.status==='In Progress'?'selected':''}>In Progress</option><option ${t.status==='Completed'?'selected':''}>Completed</option></select></td><td>${photoThumb(t.photo_data,t.title)}<div style="margin-top:8px"><input id="fc_photo_${t.id}" type="file" accept="image/*" style="max-width:230px"><div class="actions" style="margin-top:6px"><button onclick="fcUploadPhoto(${t.id})">Upload / Replace</button>${t.photo_data?`<button class="danger" onclick="fcDeletePhoto(${t.id})">Delete Photo</button>`:''}</div></div></td><td><button onclick="fcSaveEmployeeTask(${t.id})">Save Status</button></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">No tasks assigned to you.</div></td></tr>`}</tbody></table></div></div>`;
   };
-  // The original app maps the Tasks page to viewTasks; replace it with the complete UI above.
   if(typeof render==='function' && current==='Tasks') render('Tasks');
 })();

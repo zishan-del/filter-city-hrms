@@ -1,0 +1,99 @@
+name: Fix payroll on task-photo stable
+
+on:
+  push:
+    branches: [feature/task-photo-stable-fix]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-payroll:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch employee allowances and automatic payroll
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # ---------------- index.html ----------------
+          p = Path('index.html')
+          s = p.read_text()
+
+          salary_old = '<div class="field"><label>Salary</label><input id="salary" type="number" step="0.01" value="${e.salary||0}"></div>'
+          salary_new = salary_old + '<div class="field"><label>Housing allowance</label><input id="housing_allowance" type="number" step="0.01" value="${e.housing_allowance||0}"></div><div class="field"><label>Transport allowance</label><input id="transport_allowance" type="number" step="0.01" value="${e.transport_allowance||0}"></div><div class="field"><label>Other fixed allowance</label><input id="other_allowance" type="number" step="0.01" value="${e.other_allowance||0}"></div>'
+          if 'id="housing_allowance"' not in s:
+              if salary_old not in s:
+                  raise SystemExit('Employee salary field pattern not found')
+              s = s.replace(salary_old, salary_new, 1)
+
+          body_old = 'salary:salary.value,bank_details:bank_details.value,status:status.value,leave_cycle_years:'
+          body_new = 'salary:salary.value,housing_allowance:housing_allowance.value,transport_allowance:transport_allowance.value,other_allowance:other_allowance.value,bank_details:bank_details.value,status:status.value,leave_cycle_years:'
+          if 'housing_allowance:housing_allowance.value' not in s:
+              if body_old not in s:
+                  raise SystemExit('Employee save body pattern not found')
+              s = s.replace(body_old, body_new, 1)
+
+          start = s.index('function viewPayroll(){')
+          end = s.index('function viewEOSB(){', start)
+          payroll = '''function viewPayroll(){if(role!=='ADMIN')return `<div class="section"><div class="empty">Admin only.</div></div>`;const months=[...new Set(state.payroll.map(p=>p.pay_month))];const month=new Date().toISOString().slice(0,7);const selected=months.includes(month)?month:(months[0]||month);const rows=state.payroll.filter(p=>p.pay_month===selected);return `<div class="section"><div class="section-head"><b>Payroll</b><div class="actions"><label style="display:flex;align-items:center;gap:6px">Month <select id="payroll_month" onchange="renderPayrollMonth()">${[...new Set([month,...months])].sort().reverse().map(m=>`<option ${m===selected?'selected':''}>${m}</option>`).join('')}</select></label><button onclick="payrollForm()">+ Add / Adjust Payroll</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Month</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net</th><th></th></tr></thead><tbody>${rows.map(p=>`<tr><td>${esc(p.employee_id)}</td><td>${esc(p.pay_month)}</td><td>${Number(p.basic_salary).toFixed(2)}</td><td>${Number(p.allowances).toFixed(2)}</td><td>${Number(p.deductions).toFixed(2)}</td><td><b>${Number(p.net_salary).toFixed(2)}</b></td><td><button onclick='payrollForm(${JSON.stringify(p)})'>Edit</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No payroll records.</td></tr>'}</tbody></table></div></div>`}
+function renderPayrollMonth(){render('Payroll')}
+function payrollForm(p={}){const emp=state.employees.find(e=>e.employee_id===p.employee_id)||state.employees[0]||{};const basic=p.id?p.basic_salary:(emp.salary||0);const allowances=p.id?p.allowances:(Number(emp.housing_allowance||0)+Number(emp.transport_allowance||0)+Number(emp.other_allowance||0));document.getElementById('content').innerHTML=`<div class="section"><div class="section-head"><b>${p.id?'Edit':'Add'} Payroll</b><button class="secondary" onclick="render('Payroll')">Back</button></div><div class="form-grid"><div class="field"><label>Employee</label><select id="pay_emp" onchange="fillPayrollDefaults()">${state.employees.map(e=>`<option value="${esc(e.employee_id)}" ${e.employee_id===(p.employee_id||emp.employee_id)?'selected':''}>${esc(e.employee_id)} — ${esc(e.full_name)}</option>`).join('')}</select></div><div class="field"><label>Pay month</label><input id="pay_month" type="month" value="${esc(p.pay_month||new Date().toISOString().slice(0,7))}"></div><div class="field"><label>Basic salary</label><input id="pay_basic" type="number" step="0.01" value="${basic}"></div><div class="field"><label>Housing allowance</label><input id="pay_housing" type="number" step="0.01" value="${p.id?'':emp.housing_allowance||0}"><small class="muted">Included in monthly allowances</small></div><div class="field"><label>Transport allowance</label><input id="pay_transport" type="number" step="0.01" value="${p.id?'':emp.transport_allowance||0}"></div><div class="field"><label>Other fixed allowance</label><input id="pay_other" type="number" step="0.01" value="${p.id?'':emp.other_allowance||0}"></div><div class="field"><label>Total allowances</label><input id="pay_allow" type="number" step="0.01" value="${allowances}"></div><div class="field"><label>Deductions</label><input id="pay_ded" type="number" step="0.01" value="${p.deductions||0}"></div><div class="field"><label>Net salary</label><input id="pay_net" type="number" step="0.01" value="${Number(basic)+Number(allowances)-Number(p.deductions||0)}" readonly></div><div class="full"><button onclick="savePayroll(${p.id||'null'})">Save to Cloud</button></div></div></div>`}
+function fillPayrollDefaults(){const e=state.employees.find(x=>x.employee_id===pay_emp.value)||{};pay_basic.value=e.salary||0;pay_housing.value=e.housing_allowance||0;pay_transport.value=e.transport_allowance||0;pay_other.value=e.other_allowance||0;pay_allow.value=Number(pay_housing.value||0)+Number(pay_transport.value||0)+Number(pay_other.value||0);pay_net.value=Number(pay_basic.value||0)+Number(pay_allow.value||0)-Number(pay_ded.value||0)}
+async function savePayroll(id=null){const allowances=Number(pay_allow.value||0);const body={employee_id:pay_emp.value,pay_month:pay_month.value,basic_salary:Number(pay_basic.value||0),allowances,deductions:Number(pay_ded.value||0)};await api(id?'PUT':'POST',id?`payroll/${id}`:'payroll',body);toast('Payroll saved to cloud');await refresh()}
+'''
+          s = s[:start] + payroll + s[end:]
+          p.write_text(s)
+
+          # ---------------- api/hrms.js ----------------
+          p = Path('api/hrms.js')
+          s = p.read_text()
+
+          if 'ADD COLUMN IF NOT EXISTS housing_allowance' not in s:
+              marker = "await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS leave_cycle_years NUMERIC(5,2) NOT NULL DEFAULT 2`;"
+              if marker not in s:
+                  raise SystemExit('Employee schema marker not found')
+              additions = "await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS housing_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;\n await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS transport_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;\n await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS other_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;\n "
+              s = s.replace(marker, additions + marker, 1)
+
+          if 'async function ensureCurrentPayroll()' not in s:
+              marker = 'async function data(req,res){'
+              if marker not in s:
+                  raise SystemExit('data function marker not found')
+              fn = "async function ensureCurrentPayroll(){const month=new Date().toISOString().slice(0,7);const employees=await sql`SELECT employee_id,salary,housing_allowance,transport_allowance,other_allowance,status FROM employees WHERE status='Active' ORDER BY employee_id`;for(const e of employees){const existing=await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;if(existing.length)continue;const basic=Number(e.salary||0);const allowances=Number(e.housing_allowance||0)+Number(e.transport_allowance||0)+Number(e.other_allowance||0);await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;}}\n"
+              s = s.replace(marker, fn + marker, 1)
+
+          s = s.replace('async function data(req,res){const user=auth(req);if(!user)return send(res,401,{error:\'Unauthorized\'});', 'async function data(req,res){const user=auth(req);if(!user)return send(res,401,{error:\'Unauthorized\'});await ensureCurrentPayroll();', 1)
+
+          old_create = 'salary NUMERIC(14,2) DEFAULT 0,bank_details'
+          if old_create in s and 'housing_allowance NUMERIC(14,2) DEFAULT 0,transport_allowance NUMERIC(14,2) DEFAULT 0' not in s:
+              s = s.replace(old_create, 'salary NUMERIC(14,2) DEFAULT 0,housing_allowance NUMERIC(14,2) DEFAULT 0,transport_allowance NUMERIC(14,2) DEFAULT 0,other_allowance NUMERIC(14,2) DEFAULT 0,bank_details', 1)
+
+          old = 'salary,bank_details,status,leave_cycle_years,last_leave_end_date,next_leave_date,planned_leave_days) VALUES(${body.employee_id},${body.full_name},${body.mobile||\'\'},${body.national_id||\'\'},${body.nationality||\'Saudi\'},${body.joining_date||null},${body.department||\'\'},${body.job_title||\'\'},${Number(body.salary||0)},${body.bank_details||\'\'}'
+          new = 'salary,housing_allowance,transport_allowance,other_allowance,bank_details,status,leave_cycle_years,last_leave_end_date,next_leave_date,planned_leave_days) VALUES(${body.employee_id},${body.full_name},${body.mobile||\'\'},${body.national_id||\'\'},${body.nationality||\'Saudi\'},${body.joining_date||null},${body.department||\'\'},${body.job_title||\'\'},${Number(body.salary||0)},${Number(body.housing_allowance||0)},${Number(body.transport_allowance||0)},${Number(body.other_allowance||0)},${body.bank_details||\'\'}'
+          if old in s and 'Number(body.housing_allowance||0)' not in s:
+              s = s.replace(old, new, 1)
+
+          old = 'salary=${Number(body.salary||0)},bank_details=${body.bank_details||\'\'},status='
+          new = 'salary=${Number(body.salary||0)},housing_allowance=${Number(body.housing_allowance||0)},transport_allowance=${Number(body.transport_allowance||0)},other_allowance=${Number(body.other_allowance||0)},bank_details=${body.bank_details||\'\'},status='
+          if old in s and 'housing_allowance=${Number(body.housing_allowance||0)}' not in s:
+              s = s.replace(old, new, 1)
+
+          old_pay = "if(resource==='payroll'){if(!adminOnly(user,res))return;if(req.method==='POST'){const basic=Number(body.basic_salary||0),allowances=Number(body.allowances||0),deductions=Number(body.deductions||0);const row=await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${body.employee_id},${body.pay_month},${basic},${allowances},${deductions},${basic+allowances-deductions}) RETURNING *`;return send(res,201,{payroll:row[0]})}}"
+          new_pay = "if(resource==='payroll'){if(!adminOnly(user,res))return;if(req.method==='POST'){const basic=Number(body.basic_salary||0),allowances=Number(body.allowances||0),deductions=Number(body.deductions||0);const row=await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${body.employee_id},${body.pay_month},${basic},${allowances},${deductions},${basic+allowances-deductions}) RETURNING *`;return send(res,201,{payroll:row[0]})}if(req.method==='PUT'&&id){const basic=Number(body.basic_salary||0),allowances=Number(body.allowances||0),deductions=Number(body.deductions||0);const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},deductions=${deductions},net_salary=${basic+allowances-deductions} WHERE id=${id} RETURNING *`;return send(res,200,{payroll:row[0]})}}"
+          if old_pay in s and 'req.method===\'PUT\'&&id' not in s[s.index("if(resource==='payroll')"):s.index("if(resource==='eosb')")]:
+              s = s.replace(old_pay, new_pay, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Commit payroll fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html api/hrms.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix new employee payroll and allowances on stable task-photo build'
+          git push

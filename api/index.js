@@ -28,7 +28,8 @@ function sendJson(res, status, body) {
 function sendAppShell(res) {
   const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
   const ui = fs.readFileSync(path.join(process.cwd(), 'task-photo-ui.js'), 'utf8');
-  const injected = html.replace('</body>', `<script>\n${ui}\n</script>\n</body>`);
+  const leaveReasonUi = fs.readFileSync(path.join(process.cwd(), 'leave-reason-ui.js'), 'utf8');
+  const injected = html.replace('</body>', `<script>\n${ui}\n</script>\n<script>\n${leaveReasonUi}\n</script>\n</body>`);
   res.statusCode = 200;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, max-age=0');

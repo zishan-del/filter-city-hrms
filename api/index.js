@@ -20,8 +20,9 @@ function makeEmployeeAwareToken(decoded, employeeId) {
 
 function sendAppShell(res) {
   const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
-  const ui = fs.readFileSync(path.join(process.cwd(), 'task-photo-ui.js'), 'utf8');
-  const injected = html.replace('</body>', `<script>\n${ui}\n</script>\n</body>`);
+  const taskUi = fs.readFileSync(path.join(process.cwd(), 'task-photo-ui.js'), 'utf8');
+  const payrollUi = fs.readFileSync(path.join(process.cwd(), 'payroll-fix-ui.js'), 'utf8');
+  const injected = html.replace('</body>', `<script>\n${taskUi}\n</script>\n<script>\n${payrollUi}\n</script>\n</body>`);
   res.statusCode = 200;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -38,6 +39,64 @@ async function readJson(req) {
     });
     req.on('error', reject);
   });
+}
+
+async function ensurePayrollSupport() {
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS housing_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS transport_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS other_allowance NUMERIC(14,2) NOT NULL DEFAULT 0`;
+
+  const month = new Date().toISOString().slice(0, 7);
+  const employees = await sql`SELECT employee_id,salary,housing_allowance,transport_allowance,other_allowance,status FROM employees WHERE status='Active' ORDER BY employee_id`;
+  for (const employee of employees) {
+    const existing = await sql`SELECT id FROM payroll WHERE employee_id=${employee.employee_id} AND pay_month=${month} LIMIT 1`;
+    if (existing.length) continue;
+    const basic = Number(employee.salary || 0);
+    const allowances = Number(employee.housing_allowance || 0) + Number(employee.transport_allowance || 0) + Number(employee.other_allowance || 0);
+    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${employee.employee_id},${month},${basic},${allowances},0,${basic + allowances})`;
+  }
+}
+
+async function handleEmployeeAllowances(req, res, decoded) {
+  if (!decoded || decoded.role !== 'ADMIN') {
+    res.statusCode = 403;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.end(JSON.stringify({ error: 'Admin access required' }));
+  }
+  const body = await readJson(req);
+  const employeeId = String(body.employee_id || '').trim();
+  if (!employeeId) {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.end(JSON.stringify({ error: 'Employee ID required' }));
+  }
+
+  await ensurePayrollSupport();
+  const housing = Number(body.housing_allowance || 0);
+  const transport = Number(body.transport_allowance || 0);
+  const other = Number(body.other_allowance || 0);
+  const employee = await sql`UPDATE employees SET housing_allowance=${housing},transport_allowance=${transport},other_allowance=${other} WHERE employee_id=${employeeId} RETURNING *`;
+  if (!employee.length) {
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.end(JSON.stringify({ error: 'Employee not found' }));
+  }
+
+  const month = new Date().toISOString().slice(0, 7);
+  const basic = Number(employee[0].salary || 0);
+  const allowances = housing + transport + other;
+  const existing = await sql`SELECT id,deductions FROM payroll WHERE employee_id=${employeeId} AND pay_month=${month} LIMIT 1`;
+  if (existing.length) {
+    const deductions = Number(existing[0].deductions || 0);
+    await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowances},net_salary=${basic + allowances - deductions} WHERE id=${existing[0].id}`;
+  } else {
+    await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${employeeId},${month},${basic},${allowances},0,${basic + allowances})`;
+  }
+
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  return res.end(JSON.stringify({ employee: employee[0] }));
 }
 
 async function handleTaskPhoto(req, res, taskId, decoded) {
@@ -90,6 +149,14 @@ module.exports = async (req, res) => {
     const authHeader = req.headers.authorization || '';
     const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
     const decoded = decodeToken(rawToken);
+
+    if (cleanPath === 'employee-allowances' && req.method === 'PUT') {
+      return handleEmployeeAllowances(req, res, decoded);
+    }
+
+    if (cleanPath === 'data' && req.method === 'GET') {
+      await ensurePayrollSupport();
+    }
 
     if (cleanPath.startsWith('task-photo/') && (req.method === 'PUT' || req.method === 'DELETE')) {
       return handleTaskPhoto(req, res, cleanPath.split('/')[1], decoded);

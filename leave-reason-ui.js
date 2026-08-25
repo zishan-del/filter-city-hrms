@@ -5,8 +5,8 @@
 
   const leaveRows = () => {
     const me = JSON.parse(sessionStorage.getItem('fc_user') || '{}');
-    const all = Array.isArray(window.state && window.state.leaves) ? window.state.leaves : [];
-    return String(window.role || '').toUpperCase() === 'EMPLOYEE'
+    const all = Array.isArray(state && state.leaves) ? state.leaves : [];
+    return String(role || '').toUpperCase() === 'EMPLOYEE'
       ? all.filter(x => x.employee_id === me.employeeId)
       : all;
   };
@@ -50,6 +50,4 @@
       if(page === 'Leave') requestAnimationFrame(addReasonColumn);
     };
   }
-
-  if(window.current === 'Leave') requestAnimationFrame(addReasonColumn);
 })();

@@ -1,0 +1,1 @@
+Task photo stable fix: Admin task form now exposes optional photo upload, and task photo writes are handled by the API wrapper without changing Payroll, EOSB, or Attendance routes.

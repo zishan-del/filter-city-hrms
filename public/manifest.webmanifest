@@ -1,0 +1,11 @@
+{
+  "name": "FILTER CITY HRMS",
+  "short_name": "FILTER CITY HRMS",
+  "description": "FILTER CITY Human Resources Management System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f6fa",
+  "theme_color": "#0b3158",
+  "orientation": "portrait-primary",
+  "icons": []
+}

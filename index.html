@@ -64,4 +64,4 @@ function viewSettings(){if(role!=='ADMIN')return `<div class="section"><div clas
 async function saveCompanySettings(){await api('PUT','settings',{company:set_company.value,hours:set_hours.value,annual_leave_days:set_leave.value});toast('Settings saved to cloud');await refresh()}
 async function changeAdminPassword(){if(new_password.value.length<8)return toast('New password must be at least 8 characters');if(new_password.value!==confirm_password.value)return toast('New passwords do not match');await api('POST','auth/change-password',{current_password:current_password.value,new_password:new_password.value});current_password.value='';new_password.value='';confirm_password.value='';toast('Admin password changed successfully')}
 </script>
-</body></html>
+<script src="reports-ui.js"></script></body></html>

@@ -2,6 +2,7 @@
 (function(){
   const originalEmployeeForm = window.employeeForm;
   const originalSaveEmployee = window.saveEmployee;
+  const originalViewAttendance = window.viewAttendance;
   const payrollMonth = () => {
     const parts = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Riyadh',year:'numeric',month:'2-digit'}).formatToParts(new Date());
     const y=parts.find(p=>p.type==='year')?.value, m=parts.find(p=>p.type==='month')?.value;
@@ -72,5 +73,37 @@
   window.savePayroll = async function(){
     await api('POST','payroll',{employee_id:pay_emp.value,pay_month:pay_month.value,basic_salary:pay_basic.value,allowances:pay_allow.value,deductions:pay_ded.value});
     toast('Payroll saved'); await refresh();
+  };
+
+  const addressCache = new Map();
+  async function gpsAddress(lat,lng){
+    const key=`${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;
+    if(addressCache.has(key)) return addressCache.get(key);
+    try{
+      const r=await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}&localityLanguage=en`);
+      if(!r.ok) throw Error('reverse geocode failed');
+      const d=await r.json();
+      const parts=[d.locality,d.city,d.principalSubdivision,d.countryName].filter(Boolean);
+      const address=parts.join(', ') || `GPS: ${lat}, ${lng}`;
+      addressCache.set(key,address); return address;
+    }catch(_){return `GPS: ${lat}, ${lng}`;}
+  }
+  function addGpsAddresses(){
+    document.querySelectorAll('#content .table tbody tr').forEach(row=>{
+      if(row.dataset.gpsDone) return;
+      const text=Array.from(row.querySelectorAll('td')).map(td=>td.textContent||'').join(' ');
+      const m=text.match(/(-?\d{1,3}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})/);
+      if(!m) return;
+      row.dataset.gpsDone='1';
+      const holder=document.createElement('div'); holder.className='muted'; holder.style.cssText='font-size:11px;margin-top:4px;white-space:normal;max-width:260px'; holder.textContent='Getting address…';
+      const cell=Array.from(row.querySelectorAll('td')).find(td=>(td.textContent||'').includes(m[0]));
+      (cell||row.lastElementChild)?.appendChild(holder);
+      gpsAddress(m[1],m[2]).then(x=>{holder.textContent='📍 '+x;});
+    });
+  }
+  window.viewAttendance = function(){
+    const html=originalViewAttendance();
+    setTimeout(addGpsAddresses,50);
+    return html;
   };
 })();

@@ -1,0 +1,1 @@
+Stable promotion marker for the tested app-build version.

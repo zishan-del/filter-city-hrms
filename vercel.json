@@ -10,9 +10,23 @@
     },
     "api/hrms.js": {
       "maxDuration": 30
+    },
+    "api/employee-delete.js": {
+      "maxDuration": 30
+    },
+    "api/data-clean.js": {
+      "maxDuration": 30
     }
   },
   "routes": [
+    {
+      "src": "/api/employees/(\\d+)",
+      "dest": "/api/employee-delete?id=$1"
+    },
+    {
+      "src": "/api/data",
+      "dest": "/api/data-clean"
+    },
     {
       "src": "/api/(.*)",
       "dest": "/api/index?path=$1"

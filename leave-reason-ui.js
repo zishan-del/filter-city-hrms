@@ -11,8 +11,8 @@
       : all;
   };
 
-  const escReason = value => String(value ?? '').replace(/[&<>"']/g, m => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  const escReason = value => String(value ?? '').replace(/[&<>\"']/g, m => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', "'":'&#39;'
   }[m]));
 
   function addReasonColumn(){
@@ -50,4 +50,38 @@
       if(page === 'Leave') requestAnimationFrame(addReasonColumn);
     };
   }
+
+  // Stable-version-only admin email alias:
+  // The August 27 stable backend keeps the original admin record. We translate
+  // only the Admin login input from the new public email to that existing record.
+  const originalLogin = window.login;
+  if(typeof originalLogin === 'function'){
+    window.login = async function(e){
+      const admin = String(window.role || '').toUpperCase() === 'ADMIN';
+      const input = document.getElementById('username');
+      const originalUsername = input ? input.value : '';
+      if(admin && input && originalUsername.trim().toLowerCase() === 'admin@filtercity.com'){
+        input.value = 'admin@company.com';
+        try {
+          await originalLogin(e);
+        } finally {
+          input.value = originalUsername;
+        }
+        const app = document.getElementById('app');
+        if(app && !app.classList.contains('hidden')){
+          const user = JSON.parse(sessionStorage.getItem('fc_user') || '{}');
+          user.username = 'admin@filtercity.com';
+          sessionStorage.setItem('fc_user', JSON.stringify(user));
+          const who = document.getElementById('who');
+          if(who) who.textContent = 'admin@filtercity.com';
+          if(typeof current !== 'undefined' && typeof render === 'function') render(current);
+        }
+        return;
+      }
+      return originalLogin(e);
+    };
+  }
+
+  const demo = document.getElementById('demo');
+  if(demo) demo.textContent = 'Default admin: admin@filtercity.com / Admin@12345';
 })();

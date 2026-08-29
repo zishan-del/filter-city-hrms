@@ -53,7 +53,7 @@ public class MainActivity extends Activity {
             checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, LOCATION_PERMISSION);
         }
-        web.loadUrl("https://filter-city-hrms.vercel.app/");
+        web.loadUrl("https://filter-city-hrms-ooarvzw4y-filtercity.vercel.app/");
         setContentView(web);
     }
 

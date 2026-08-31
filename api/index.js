@@ -1,204 +1,81 @@
 const { neon } = require('@neondatabase/serverless');
 const fs = require('fs');
 const path = require('path');
-
 const handler = require('./hrms.js');
 const sql = neon(process.env.DATABASE_URL);
-
-function decodeToken(token) {
-  try { return JSON.parse(Buffer.from(token, 'base64url').toString('utf8')); } catch (_) { return null; }
+function decodeToken(token){try{return JSON.parse(Buffer.from(token,'base64url').toString('utf8'));}catch(_){return null;}}
+function makeEmployeeAwareToken(decoded,employeeId){return Buffer.from(JSON.stringify({id:decoded.id,role:decoded.role,employee_id:employeeId||null,exp:decoded.exp})).toString('base64url');}
+function sendJson(res,status,body){res.statusCode=status;res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store, max-age=0');res.end(JSON.stringify(body));}
+function sendAppShell(res){const html=fs.readFileSync(path.join(process.cwd(),'index.html'),'utf8');const ui=fs.readFileSync(path.join(process.cwd(),'task-photo-ui.js'),'utf8');const leaveReasonUi=fs.readFileSync(path.join(process.cwd(),'leave-reason-ui.js'),'utf8');const payrollUi=fs.readFileSync(path.join(process.cwd(),'payroll-ui.js'),'utf8');const injected=html.replace('</body>',`<script>\n${ui}\n</script>\n<script>\n${leaveReasonUi}\n</script>\n<script>\n${payrollUi}\n</script>\n</body>`);res.statusCode=200;res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Cache-Control','no-store, max-age=0');res.end(injected);}
+async function readJson(req){return await new Promise((resolve,reject)=>{let data='';req.on('data',chunk=>{data+=chunk;});req.on('end',()=>{if(!data)return resolve({});try{resolve(JSON.parse(data));}catch(e){reject(e);}});req.on('error',reject);});}
+function riyadhNowParts(){const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Riyadh',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date());const out={};for(const p of parts)if(p.type!=='literal')out[p.type]=p.value;return out;}
+function riyadhDate(){const p=riyadhNowParts();return `${p.year}-${p.month}-${p.day}`;}
+function riyadhDateTime(){const p=riyadhNowParts();return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;}
+function riyadhMonth(){const p=riyadhNowParts();return `${p.year}-${p.month}`;}
+function parseLocal(s){if(!s)return null;const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);if(!m)return null;return new Date(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4]-3,+m[5],+(m[6]||0)));}
+function minutesBetween(a,b){const x=parseLocal(a),y=parseLocal(b);return x&&y?Math.max(0,Math.round((y-x)/60000)):0;}
+function nightMinutes(a,b){const x=parseLocal(a),y=parseLocal(b);if(!x||!y||y<=x)return 0;let total=0;for(let d=new Date(Date.UTC(x.getUTCFullYear(),x.getUTCMonth(),x.getUTCDate()));d<y;d.setUTCDate(d.getUTCDate()+1)){const n1=new Date(d);n1.setUTCHours(19,0,0,0);const n2=new Date(d);n2.setUTCDate(n2.getUTCDate()+1);n2.setUTCHours(3,0,0,0);const start=Math.max(x,n1),end=Math.min(y,n2);if(end>start)total+=Math.round((end-start)/60000);}return total;}
+async function ensureAttendanceSchema(){
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS checkin_accuracy NUMERIC(10,2)`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS checkout_latitude NUMERIC(10,7)`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS checkout_longitude NUMERIC(10,7)`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS checkout_accuracy NUMERIC(10,2)`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS break_start TEXT`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS break_end TEXT`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS break_duration_minutes INTEGER NOT NULL DEFAULT 0`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS working_minutes INTEGER NOT NULL DEFAULT 0`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS overtime_minutes INTEGER NOT NULL DEFAULT 0`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS night_minutes INTEGER NOT NULL DEFAULT 0`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS early_checkout_minutes INTEGER NOT NULL DEFAULT 0`;
+ await sql`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_minutes INTEGER NOT NULL DEFAULT 0`;
+ await sql`CREATE TABLE IF NOT EXISTS attendance_audit (id SERIAL PRIMARY KEY,attendance_id INTEGER NOT NULL,employee_id TEXT NOT NULL,action TEXT NOT NULL,actor_id INTEGER,actor_role TEXT,details TEXT DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
+ await sql`CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY,employee_id TEXT NOT NULL,endpoint TEXT UNIQUE NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
 }
-
-function makeEmployeeAwareToken(decoded, employeeId) {
-  return Buffer.from(JSON.stringify({
-    id: decoded.id,
-    role: decoded.role,
-    employee_id: employeeId || null,
-    exp: decoded.exp
-  })).toString('base64url');
+async function audit(att,decoded,action,details=''){await sql`INSERT INTO attendance_audit(attendance_id,employee_id,action,actor_id,actor_role,details) VALUES(${att.id},${att.employee_id},${action},${Number(decoded?.id||0)||null},${decoded?.role||''},${details})`;}
+async function handleAttendance(req,res,decoded){
+ if(!decoded||!decoded.id||!decoded.exp||decoded.exp<Date.now())return sendJson(res,401,{error:'Unauthorized'});
+ await ensureAttendanceSchema();
+ if(req.method!=='POST')return sendJson(res,405,{error:'Method not allowed'});
+ const body=await readJson(req);const employeeId=decoded.role==='EMPLOYEE'?decoded.employee_id:String(body.employee_id||'').trim();if(!employeeId)return sendJson(res,400,{error:'Employee ID required'});
+ const today=String(body.work_date||riyadhDate()).slice(0,10);let existing=(await sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND work_date=${today} LIMIT 1`)[0];
+ const action=String(body.action||'checkin');
+ if(action==='checkin'){
+   if(existing)return sendJson(res,200,{attendance:existing});
+   const row=(await sql`INSERT INTO attendance(employee_id,work_date,check_in,latitude,longitude,checkin_accuracy,status) VALUES(${employeeId},${today},${riyadhDateTime()},${body.latitude||null},${body.longitude||null},${body.accuracy||null},'Present') RETURNING *`)[0];await audit(row,decoded,'CHECK_IN',`GPS ${body.latitude||''},${body.longitude||''}`);return sendJson(res,201,{attendance:row});
+ }
+ if(!existing)return sendJson(res,400,{error:'Check in first'});
+ if(action==='break_start'){
+   if(existing.check_out)return sendJson(res,400,{error:'Already checked out'});
+   if(existing.break_start&&!existing.break_end)return sendJson(res,400,{error:'Break already started'});
+   const row=(await sql`UPDATE attendance SET break_start=${riyadhDateTime()},break_end=NULL,break_duration_minutes=0 WHERE id=${existing.id} RETURNING *`)[0];await audit(row,decoded,'BREAK_START');return sendJson(res,200,{attendance:row});
+ }
+ if(action==='break_end'){
+   if(!existing.break_start)return sendJson(res,400,{error:'Start break first'});
+   if(existing.break_end)return sendJson(res,400,{error:'Break already ended'});
+   const end=riyadhDateTime(),mins=minutesBetween(existing.break_start,end);const row=(await sql`UPDATE attendance SET break_end=${end},break_duration_minutes=${mins} WHERE id=${existing.id} RETURNING *`)[0];await audit(row,decoded,'BREAK_END',`Duration ${mins} minutes`);return sendJson(res,200,{attendance:row});
+ }
+ if(action==='checkout'){
+   if(existing.check_out)return sendJson(res,400,{error:'Already checked out'});
+   if(existing.break_start&&!existing.break_end)return sendJson(res,400,{error:'End your break before checking out'});
+   const out=riyadhDateTime(),presence=minutesBetween(existing.check_in,out),breakM=Number(existing.break_duration_minutes||0),working=Math.max(0,presence-breakM);
+   const hours=(await sql`SELECT hours FROM settings WHERE id=1 LIMIT 1`)[0]?.hours||8;const scheduled=Math.round(Number(hours)*60);const overtime=Math.max(0,working-scheduled);const early=Math.max(0,scheduled-working);const night=nightMinutes(existing.check_in,out);
+   const row=(await sql`UPDATE attendance SET check_out=${out},checkout_latitude=${body.latitude||null},checkout_longitude=${body.longitude||null},checkout_accuracy=${body.accuracy||null},working_minutes=${working},overtime_minutes=${overtime},night_minutes=${night},early_checkout_minutes=${early},status='Present' WHERE id=${existing.id} RETURNING *`)[0];await audit(row,decoded,'CHECK_OUT',`GPS ${body.latitude||''},${body.longitude||''}; working ${working}m`);return sendJson(res,200,{attendance:row});
+ }
+ return sendJson(res,400,{error:'Unknown attendance action'});
 }
-
-function sendJson(res, status, body) {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store, max-age=0');
-  res.end(JSON.stringify(body));
-}
-
-function sendAppShell(res) {
-  const html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
-  const ui = fs.readFileSync(path.join(process.cwd(), 'task-photo-ui.js'), 'utf8');
-  const leaveReasonUi = fs.readFileSync(path.join(process.cwd(), 'leave-reason-ui.js'), 'utf8');
-  const payrollUi = fs.readFileSync(path.join(process.cwd(), 'payroll-ui.js'), 'utf8');
-  const injected = html.replace('</body>', `<script>\n${ui}\n</script>\n<script>\n${leaveReasonUi}\n</script>\n<script>\n${payrollUi}\n</script>\n</body>`);
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store, max-age=0');
-  res.end(injected);
-}
-
-async function readJson(req) {
-  return await new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', chunk => { data += chunk; });
-    req.on('end', () => {
-      if (!data) return resolve({});
-      try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
-    });
-    req.on('error', reject);
-  });
-}
-
-function riyadhNowParts() {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Riyadh',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hourCycle: 'h23'
-  }).formatToParts(new Date());
-  const out = {};
-  for (const p of parts) if (p.type !== 'literal') out[p.type] = p.value;
-  return out;
-}
-
-function riyadhDate() {
-  const p = riyadhNowParts();
-  return `${p.year}-${p.month}-${p.day}`;
-}
-
-function riyadhDateTime() {
-  const p = riyadhNowParts();
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
-}
-
-function riyadhMonth() {
-  const p = riyadhNowParts();
-  return `${p.year}-${p.month}`;
-}
-
-async function ensureAttendanceTimezone() {
-  const cols = await sql`SELECT column_name,data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='attendance' AND column_name IN ('check_in','check_out')`;
-  const types = Object.fromEntries(cols.map(c => [c.column_name, c.data_type]));
-  if (types.check_in === 'timestamp with time zone') {
-    await sql`ALTER TABLE attendance ALTER COLUMN check_in TYPE TEXT USING CASE WHEN check_in IS NULL THEN NULL ELSE to_char(check_in AT TIME ZONE 'Asia/Riyadh','YYYY-MM-DD HH24:MI:SS') END`;
-  }
-  if (types.check_out === 'timestamp with time zone') {
-    await sql`ALTER TABLE attendance ALTER COLUMN check_out TYPE TEXT USING CASE WHEN check_out IS NULL THEN NULL ELSE to_char(check_out AT TIME ZONE 'Asia/Riyadh','YYYY-MM-DD HH24:MI:SS') END`;
-  }
-}
-
-async function handleAttendance(req, res, decoded) {
-  if (!decoded || !decoded.id || !decoded.exp || decoded.exp < Date.now()) return sendJson(res, 401, { error: 'Unauthorized' });
-  await ensureAttendanceTimezone();
-  const body = req.method === 'POST' ? await readJson(req) : {};
-  const employeeId = decoded.role === 'EMPLOYEE' ? decoded.employee_id : String(body.employee_id || '').trim();
-  if (!employeeId) return sendJson(res, 400, { error: 'Employee ID required' });
-  if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
-
-  const today = String(body.work_date || riyadhDate()).slice(0, 10);
-  const existing = await sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND work_date=${today} LIMIT 1`;
-
-  if (body.action === 'checkout') {
-    if (!existing.length) return sendJson(res, 400, { error: 'Check in first' });
-    const row = await sql`UPDATE attendance SET check_out=${riyadhDateTime()},status='Present' WHERE id=${existing[0].id} RETURNING *`;
-    return sendJson(res, 200, { attendance: row[0] });
-  }
-
-  if (existing.length) return sendJson(res, 200, { attendance: existing[0] });
-  const row = await sql`INSERT INTO attendance(employee_id,work_date,check_in,latitude,longitude,status) VALUES(${employeeId},${today},${riyadhDateTime()},${body.latitude||null},${body.longitude||null},'Present') RETURNING *`;
-  return sendJson(res, 201, { attendance: row[0] });
-}
-
-async function handleTaskPhoto(req, res, taskId, decoded) {
-  if (!decoded || !decoded.id || !decoded.exp || decoded.exp < Date.now()) {
-    return sendJson(res, 401, { error: 'Unauthorized' });
-  }
-  const id = Number(taskId);
-  if (!id) return sendJson(res, 400, { error: 'Task ID required' });
-  const taskRows = await sql`SELECT id, employee_id FROM tasks WHERE id=${id} LIMIT 1`;
-  if (!taskRows.length) return sendJson(res, 404, { error: 'Task not found' });
-  if (decoded.role !== 'ADMIN' && taskRows[0].employee_id !== decoded.employee_id) return sendJson(res, 403, { error: 'This task is not assigned to you' });
-  const body = await readJson(req);
-  const photo = body.photo_data ? String(body.photo_data) : null;
-  if (photo && photo.length > 700000) return sendJson(res, 400, { error: 'Photo is too large. Please use a smaller photo.' });
-  const row = await sql`UPDATE tasks SET photo_data=${photo}, updated_at=NOW() WHERE id=${id} RETURNING *`;
-  return sendJson(res, 200, { task: row[0] });
-}
-
-async function ensurePayrollSchema() {
-  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS payroll_allowances NUMERIC(14,2) NOT NULL DEFAULT 0`;
-}
-
-async function handlePayrollSync(req, res, decoded) {
-  if (!decoded || decoded.role !== 'ADMIN') return sendJson(res, 403, { error: 'Admin access required' });
-  const body = req.method === 'POST' ? await readJson(req) : {};
-  await ensurePayrollSchema();
-  const month = String(body.pay_month || riyadhMonth()).slice(0,7);
-  const employees = await sql`SELECT employee_id,salary,payroll_allowances,status FROM employees WHERE status='Active' ORDER BY id`;
-  for (const e of employees) {
-    const existing = await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;
-    if (!existing.length) {
-      const basic = Number(e.salary || 0);
-      const allowances = Number(e.payroll_allowances || 0);
-      await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;
-    }
-  }
-  const rows = await sql`SELECT * FROM payroll WHERE pay_month=${month} ORDER BY id DESC`;
-  return sendJson(res, 200, { pay_month: month, payroll: rows });
-}
-
-async function handleEmployeePayrollDefault(req, res, decoded) {
-  if (!decoded || decoded.role !== 'ADMIN') return sendJson(res, 403, { error: 'Admin access required' });
-  const body = await readJson(req);
-  await ensurePayrollSchema();
-  const employeeId = String(body.employee_id || '').trim();
-  if (!employeeId) return sendJson(res, 400, { error: 'Employee ID required' });
-  const allowance = Math.max(0, Number(body.allowances || 0));
-  const month = String(body.pay_month || riyadhMonth()).slice(0,7);
-  const employees = await sql`SELECT employee_id,salary FROM employees WHERE employee_id=${employeeId} LIMIT 1`;
-  if (!employees.length) return sendJson(res, 404, { error: 'Employee not found' });
-  await sql`UPDATE employees SET payroll_allowances=${allowance} WHERE employee_id=${employeeId}`;
-  const basic = Number(employees[0].salary || 0);
-  const existing = await sql`SELECT id,deductions FROM payroll WHERE employee_id=${employeeId} AND pay_month=${month} LIMIT 1`;
-  if (existing.length) {
-    const deductions = Number(existing[0].deductions || 0);
-    const row = await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowance},net_salary=${basic+allowance-deductions} WHERE id=${existing[0].id} RETURNING *`;
-    return sendJson(res, 200, { payroll: row[0] });
-  }
-  const row = await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${employeeId},${month},${basic},${allowance},0,${basic+allowance}) RETURNING *`;
-  return sendJson(res, 201, { payroll: row[0] });
-}
-
-module.exports = async (req, res) => {
-  try {
-    const incoming = new URL(req.url || '/api/index', 'http://localhost');
-    const pathParam = incoming.searchParams.get('path');
-    if (pathParam === '__app__') return sendAppShell(res);
-    if (pathParam) req.url = '/api/' + pathParam.replace(/^\/+/, '');
-
-    const cleanPath = (req.url || '').split('?')[0].replace(/^\/api\/?/, '').replace(/\/$/, '');
-    const authHeader = req.headers.authorization || '';
-    const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
-    let decoded = decodeToken(rawToken);
-
-    if (authHeader && cleanPath !== 'auth/login' && decoded && decoded.id && decoded.role === 'EMPLOYEE' && !decoded.employee_id) {
-      const rows = await sql`SELECT employee_id FROM users WHERE id=${Number(decoded.id)} AND role='EMPLOYEE' LIMIT 1`;
-      if (rows.length && rows[0].employee_id) {
-        decoded = { ...decoded, employee_id: rows[0].employee_id };
-        req.headers.authorization = 'Bearer ' + makeEmployeeAwareToken(decoded, rows[0].employee_id);
-      }
-    }
-
-    if (cleanPath === 'attendance') return handleAttendance(req, res, decoded);
-    if (cleanPath.startsWith('task-photo/') && (req.method === 'PUT' || req.method === 'DELETE')) {
-      return handleTaskPhoto(req, res, cleanPath.split('/')[1], decoded);
-    }
-    if (cleanPath === 'payroll/sync' && req.method === 'POST') return handlePayrollSync(req, res, decoded);
-    if (cleanPath === 'employee-payroll-default' && req.method === 'POST') return handleEmployeePayrollDefault(req, res, decoded);
-
-    return handler(req, res);
-  } catch (error) {
-    console.error(error);
-    sendJson(res, 500, { error: error.message || 'API routing error' });
-  }
-};
+async function handleTaskPhoto(req,res,taskId,decoded){if(!decoded||!decoded.id||!decoded.exp||decoded.exp<Date.now())return sendJson(res,401,{error:'Unauthorized'});const id=Number(taskId);if(!id)return sendJson(res,400,{error:'Task ID required'});const taskRows=await sql`SELECT id,employee_id FROM tasks WHERE id=${id} LIMIT 1`;if(!taskRows.length)return sendJson(res,404,{error:'Task not found'});if(decoded.role!=='ADMIN'&&taskRows[0].employee_id!==decoded.employee_id)return sendJson(res,403,{error:'This task is not assigned to you'});const body=await readJson(req);const photo=body.photo_data?String(body.photo_data):null;if(photo&&photo.length>700000)return sendJson(res,400,{error:'Photo is too large. Please use a smaller photo.'});const row=await sql`UPDATE tasks SET photo_data=${photo},updated_at=NOW() WHERE id=${id} RETURNING *`;return sendJson(res,200,{task:row[0]});}
+async function ensurePayrollSchema(){await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS payroll_allowances NUMERIC(14,2) NOT NULL DEFAULT 0`;}
+async function handlePayrollSync(req,res,decoded){if(!decoded||decoded.role!=='ADMIN')return sendJson(res,403,{error:'Admin access required'});const body=req.method==='POST'?await readJson(req):{};await ensurePayrollSchema();const month=String(body.pay_month||riyadhMonth()).slice(0,7);const employees=await sql`SELECT employee_id,salary,payroll_allowances,status FROM employees WHERE status='Active' ORDER BY id`;for(const e of employees){const existing=await sql`SELECT id FROM payroll WHERE employee_id=${e.employee_id} AND pay_month=${month} LIMIT 1`;if(!existing.length){const basic=Number(e.salary||0),allowances=Number(e.payroll_allowances||0);await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${e.employee_id},${month},${basic},${allowances},0,${basic+allowances})`;}}const rows=await sql`SELECT * FROM payroll WHERE pay_month=${month} ORDER BY id DESC`;return sendJson(res,200,{pay_month:month,payroll:rows});}
+async function handleEmployeePayrollDefault(req,res,decoded){if(!decoded||decoded.role!=='ADMIN')return sendJson(res,403,{error:'Admin access required'});const body=await readJson(req);await ensurePayrollSchema();const employeeId=String(body.employee_id||'').trim();if(!employeeId)return sendJson(res,400,{error:'Employee ID required'});const allowance=Math.max(0,Number(body.allowances||0));const month=String(body.pay_month||riyadhMonth()).slice(0,7);const employees=await sql`SELECT employee_id,salary FROM employees WHERE employee_id=${employeeId} LIMIT 1`;if(!employees.length)return sendJson(res,404,{error:'Employee not found'});await sql`UPDATE employees SET payroll_allowances=${allowance} WHERE employee_id=${employeeId}`;const basic=Number(employees[0].salary||0);const existing=await sql`SELECT id,deductions FROM payroll WHERE employee_id=${employeeId} AND pay_month=${month} LIMIT 1`;if(existing.length){const deductions=Number(existing[0].deductions||0);const row=await sql`UPDATE payroll SET basic_salary=${basic},allowances=${allowance},net_salary=${basic+allowance-deductions} WHERE id=${existing[0].id} RETURNING *`;return sendJson(res,200,{payroll:row[0]});}const row=await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${employeeId},${month},${basic},${allowance},0,${basic+allowance}) RETURNING *`;return sendJson(res,201,{payroll:row[0]});}
+async function ensurePushSchema(){await sql`CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY,employee_id TEXT NOT NULL,endpoint TEXT UNIQUE NOT NULL,p256dh TEXT NOT NULL,auth TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;}
+async function handlePushSubscription(req,res,decoded){if(!decoded||!decoded.id||!decoded.exp||decoded.exp<Date.now())return sendJson(res,401,{error:'Unauthorized'});await ensurePushSchema();if(req.method==='POST'){const body=await readJson(req);if(decoded.role!=='EMPLOYEE')return sendJson(res,403,{error:'Employee subscription required'});if(!body.endpoint||!body.keys?.p256dh||!body.keys?.auth)return sendJson(res,400,{error:'Invalid push subscription'});await sql`INSERT INTO push_subscriptions(employee_id,endpoint,p256dh,auth,updated_at) VALUES(${decoded.employee_id},${body.endpoint},${body.keys.p256dh},${body.keys.auth},NOW()) ON CONFLICT(endpoint) DO UPDATE SET employee_id=EXCLUDED.employee_id,p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth,updated_at=NOW()`;return sendJson(res,200,{ok:true});}return sendJson(res,405,{error:'Method not allowed'});}
+async function sendPush(employeeId,payload){if(!process.env.VAPID_PUBLIC_KEY||!process.env.VAPID_PRIVATE_KEY)return;try{const webpush=require('web-push');webpush.setVapidDetails(process.env.VAPID_SUBJECT||'mailto:admin@filtercity.com',process.env.VAPID_PUBLIC_KEY,process.env.VAPID_PRIVATE_KEY);const rows=await sql`SELECT * FROM push_subscriptions WHERE employee_id=${employeeId}`;for(const s of rows){try{await webpush.sendNotification({endpoint:s.endpoint,keys:{p256dh:s.p256dh,auth:s.auth}},JSON.stringify(payload));}catch(e){if(e.statusCode===404||e.statusCode===410)await sql`DELETE FROM push_subscriptions WHERE id=${s.id}`;}}}catch(e){console.error('Push notification error',e.message);}}
+async function handleTasks(req,res,decoded){if(!decoded||decoded.role!=='ADMIN')return sendJson(res,403,{error:'Admin access required'});const body=await readJson(req);if(req.method==='POST'){const row=(await sql`INSERT INTO tasks(employee_id,title,description,task_date,start_time,deadline_time,priority,status) VALUES(${body.employee_id},${body.title},${body.description||''},${body.task_date||null},${body.start_time||null},${body.deadline_time||null},${body.priority||'Normal'},${body.status||'Pending'}) RETURNING *`)[0];await sendPush(row.employee_id,{title:'New Task Assigned',body:`${row.title}${row.deadline_time?` — deadline ${row.deadline_time}`:''}`,url:'/'});return sendJson(res,201,{task:row});}if(req.method==='PUT'){const id=Number((req.url||'').split('/').pop());const existing=(await sql`SELECT * FROM tasks WHERE id=${id} LIMIT 1`)[0];if(!existing)return sendJson(res,404,{error:'Task not found'});const row=(await sql`UPDATE tasks SET employee_id=COALESCE(${body.employee_id},employee_id),title=COALESCE(${body.title},title),description=COALESCE(${body.description},description),task_date=COALESCE(${body.task_date},task_date),start_time=COALESCE(${body.start_time},start_time),deadline_time=COALESCE(${body.deadline_time},deadline_time),priority=COALESCE(${body.priority},priority),status=COALESCE(${body.status},status),updated_at=NOW() WHERE id=${id} RETURNING *`)[0];await sendPush(row.employee_id,{title:'Task Updated',body:`${row.title}${row.deadline_time?` — deadline ${row.deadline_time}`:''}`,url:'/'});return sendJson(res,200,{task:row});}return sendJson(res,405,{error:'Method not allowed'});}
+module.exports=async(req,res)=>{try{const incoming=new URL(req.url||'/api/index','http://localhost');const pathParam=incoming.searchParams.get('path');if(pathParam==='__app__')return sendAppShell(res);if(pathParam)req.url='/api/'+pathParam.replace(/^\/+/, '');const cleanPath=(req.url||'').split('?')[0].replace(/^\/api\/?/,'').replace(/\/$/,'');const authHeader=req.headers.authorization||'';const rawToken=authHeader.replace(/^Bearer\s+/i,'').trim();let decoded=decodeToken(rawToken);if(authHeader&&cleanPath!=='auth/login'&&decoded&&decoded.id&&decoded.role==='EMPLOYEE'&&!decoded.employee_id){const rows=await sql`SELECT employee_id FROM users WHERE id=${Number(decoded.id)} AND role='EMPLOYEE' LIMIT 1`;if(rows.length&&rows[0].employee_id){decoded={...decoded,employee_id:rows[0].employee_id};req.headers.authorization='Bearer '+makeEmployeeAwareToken(decoded,rows[0].employee_id);}}
+ if(cleanPath==='attendance')return handleAttendance(req,res,decoded);
+ if(cleanPath==='push/subscribe')return handlePushSubscription(req,res,decoded);
+ if(cleanPath==='tasks'&&(req.method==='POST'||req.method==='PUT'))return handleTasks(req,res,decoded);
+ if(cleanPath.startsWith('task-photo/')&&(req.method==='PUT'||req.method==='DELETE'))return handleTaskPhoto(req,res,cleanPath.split('/')[1],decoded);
+ if(cleanPath==='payroll/sync'&&req.method==='POST')return handlePayrollSync(req,res,decoded);
+ if(cleanPath==='employee-payroll-default'&&req.method==='POST')return handleEmployeePayrollDefault(req,res,decoded);
+ return handler(req,res);}catch(error){console.error(error);sendJson(res,500,{error:error.message||'API routing error'});}};

@@ -3,107 +3,25 @@
   const originalEmployeeForm = window.employeeForm;
   const originalSaveEmployee = window.saveEmployee;
   const originalViewAttendance = window.viewAttendance;
-  const payrollMonth = () => {
-    const parts = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Riyadh',year:'numeric',month:'2-digit'}).formatToParts(new Date());
-    const y=parts.find(p=>p.type==='year')?.value, m=parts.find(p=>p.type==='month')?.value;
-    return `${y}-${m}`;
-  };
-
-  window.employeeForm = function(e={}){
-    originalEmployeeForm(e);
-    const salaryField = document.getElementById('salary')?.closest('.field');
-    if (!salaryField || document.getElementById('payroll_allowances')) return;
-    const defaultAllowance = e.payroll_allowances ?? e.allowances ?? 0;
-    salaryField.insertAdjacentHTML('afterend',
-      `<div class="field"><label>Payroll Allowances</label><input id="payroll_allowances" type="number" step="0.01" min="0" value="${esc(defaultAllowance)}"><div class="muted" style="font-size:11px;margin-top:4px">Used automatically for the current payroll month.</div></div>`
-    );
-  };
-
-  window.saveEmployee = async function(){
-    const allowance = Number(document.getElementById('payroll_allowances')?.value || 0);
-    const employeeId = document.getElementById('employee_id')?.value || '';
-    const wasNew = !document.getElementById('eid')?.value;
-    await originalSaveEmployee();
-    if (!employeeId) return;
-    try {
-      await api('POST','employee-payroll-default',{employee_id:employeeId,allowances:allowance,pay_month:payrollMonth()});
-      toast(wasNew ? 'Employee and payroll created' : 'Employee and payroll allowance saved');
-      if (current==='Employees') await refresh();
-    } catch (e) {
-      toast(e.message || 'Payroll allowance could not be saved');
-    }
-  };
-
-  function payrollMarkup(){
-    if(role!=='ADMIN') return `<div class="section"><div class="empty">Admin only.</div></div>`;
-    return `<div class="section"><div class="section-head"><b>Payroll</b><button onclick="payrollForm()">+ Add Payroll</button></div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Month</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net</th></tr></thead>
-      <tbody>${state.payroll.map(p=>`<tr><td>${esc(p.employee_id)}</td><td>${esc(p.pay_month)}</td><td>${Number(p.basic_salary||0).toFixed(2)}</td><td>${Number(p.allowances||0).toFixed(2)}</td><td>${Number(p.deductions||0).toFixed(2)}</td><td>${Number(p.net_salary||0).toFixed(2)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">No payroll records.</td></tr>'}</tbody></table></div></div>`;
-  }
-
-  window.viewPayroll = function(){
-    const html = payrollMarkup();
-    if(role==='ADMIN'){
-      setTimeout(async()=>{
-        try{
-          const d = await api('POST','payroll/sync',{pay_month:payrollMonth()});
-          if(Array.isArray(d.payroll)){
-            state.payroll = [...state.payroll.filter(p=>p.pay_month!==payrollMonth()), ...d.payroll];
-            if(current==='Payroll') document.getElementById('content').innerHTML = payrollMarkup();
-          }
-        }catch(e){ console.error('Payroll sync failed',e); }
-      },0);
-    }
-    return html;
-  };
-
-  window.payrollForm = function(){
-    document.getElementById('content').innerHTML=`<div class="section"><div class="section-head"><b>Add Payroll</b><button class="secondary" onclick="render('Payroll')">Back</button></div>
-      <div class="form-grid"><div class="field"><label>Employee</label><select id="pay_emp">${state.employees.filter(e=>e.status==='Active').map(e=>`<option value="${esc(e.employee_id)}">${esc(e.employee_id)} — ${esc(e.full_name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Pay month</label><input id="pay_month" type="month" value="${payrollMonth()}"></div>
-      <div class="field"><label>Basic salary</label><input id="pay_basic" type="number" step="0.01"></div>
-      <div class="field"><label>Allowances</label><input id="pay_allow" type="number" step="0.01" value="0"></div>
-      <div class="field"><label>Deductions</label><input id="pay_ded" type="number" step="0.01" value="0"></div>
-      <div class="full"><button onclick="savePayroll()">Save to Cloud</button></div></div></div>`;
-    const emp = document.getElementById('pay_emp');
-    const syncBasic=()=>{const e=state.employees.find(x=>x.employee_id===emp?.value); if(e) document.getElementById('pay_basic').value=Number(e.salary||0);};
-    emp?.addEventListener('change',syncBasic); syncBasic();
-  };
-
-  window.savePayroll = async function(){
-    await api('POST','payroll',{employee_id:pay_emp.value,pay_month:pay_month.value,basic_salary:pay_basic.value,allowances:pay_allow.value,deductions:pay_ded.value});
-    toast('Payroll saved'); await refresh();
-  };
-
-  const addressCache = new Map();
-  async function gpsAddress(lat,lng){
-    const key=`${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;
-    if(addressCache.has(key)) return addressCache.get(key);
-    try{
-      const r=await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}&localityLanguage=en`);
-      if(!r.ok) throw Error('reverse geocode failed');
-      const d=await r.json();
-      const parts=[d.locality,d.city,d.principalSubdivision,d.countryName].filter(Boolean);
-      const address=parts.join(', ') || `GPS: ${lat}, ${lng}`;
-      addressCache.set(key,address); return address;
-    }catch(_){return `GPS: ${lat}, ${lng}`;}
-  }
-  function addGpsAddresses(){
-    document.querySelectorAll('#content .table tbody tr').forEach(row=>{
-      if(row.dataset.gpsDone) return;
-      const text=Array.from(row.querySelectorAll('td')).map(td=>td.textContent||'').join(' ');
-      const m=text.match(/(-?\d{1,3}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})/);
-      if(!m) return;
-      row.dataset.gpsDone='1';
-      const holder=document.createElement('div'); holder.className='muted'; holder.style.cssText='font-size:11px;margin-top:4px;white-space:normal;max-width:260px'; holder.textContent='Getting address…';
-      const cell=Array.from(row.querySelectorAll('td')).find(td=>(td.textContent||'').includes(m[0]));
-      (cell||row.lastElementChild)?.appendChild(holder);
-      gpsAddress(m[1],m[2]).then(x=>{holder.textContent='📍 '+x;});
-    });
-  }
-  window.viewAttendance = function(){
-    const html=originalViewAttendance();
-    setTimeout(addGpsAddresses,50);
-    return html;
-  };
+  const payrollMonth = () => { const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Riyadh',year:'numeric',month:'2-digit'}).formatToParts(new Date()); const y=parts.find(p=>p.type==='year')?.value,m=parts.find(p=>p.type==='month')?.value; return `${y}-${m}`; };
+  window.employeeForm=function(e={}){ originalEmployeeForm(e); const salaryField=document.getElementById('salary')?.closest('.field'); if(!salaryField||document.getElementById('payroll_allowances'))return; const defaultAllowance=e.payroll_allowances??e.allowances??0; salaryField.insertAdjacentHTML('afterend',`<div class="field"><label>Payroll Allowances</label><input id="payroll_allowances" type="number" step="0.01" min="0" value="${esc(defaultAllowance)}"><div class="muted" style="font-size:11px;margin-top:4px">Used automatically for the current payroll month.</div></div>`); };
+  window.saveEmployee=async function(){const allowance=Number(document.getElementById('payroll_allowances')?.value||0),employeeId=document.getElementById('employee_id')?.value||'',wasNew=!document.getElementById('eid')?.value;await originalSaveEmployee();if(!employeeId)return;try{await api('POST','employee-payroll-default',{employee_id:employeeId,allowances:allowance,pay_month:payrollMonth()});toast(wasNew?'Employee and payroll created':'Employee and payroll allowance saved');if(current==='Employees')await refresh();}catch(e){toast(e.message||'Payroll allowance could not be saved');}};
+  function payrollMarkup(){if(role!=='ADMIN')return `<div class="section"><div class="empty">Admin only.</div></div>`;return `<div class="section"><div class="section-head"><b>Payroll</b><button onclick="payrollForm()">+ Add Payroll</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Month</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net</th></tr></thead><tbody>${state.payroll.map(p=>`<tr><td>${esc(p.employee_id)}</td><td>${esc(p.pay_month)}</td><td>${Number(p.basic_salary||0).toFixed(2)}</td><td>${Number(p.allowances||0).toFixed(2)}</td><td>${Number(p.deductions||0).toFixed(2)}</td><td>${Number(p.net_salary||0).toFixed(2)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">No payroll records.</td></tr>'}</tbody></table></div></div>`;}
+  window.viewPayroll=function(){const html=payrollMarkup();if(role==='ADMIN')setTimeout(async()=>{try{const d=await api('POST','payroll/sync',{pay_month:payrollMonth()});if(Array.isArray(d.payroll)){state.payroll=[...state.payroll.filter(p=>p.pay_month!==payrollMonth()),...d.payroll];if(current==='Payroll')document.getElementById('content').innerHTML=payrollMarkup();}}catch(e){console.error('Payroll sync failed',e);}},0);return html;};
+  window.payrollForm=function(){document.getElementById('content').innerHTML=`<div class="section"><div class="section-head"><b>Add Payroll</b><button class="secondary" onclick="render('Payroll')">Back</button></div><div class="form-grid"><div class="field"><label>Employee</label><select id="pay_emp">${state.employees.filter(e=>e.status==='Active').map(e=>`<option value="${esc(e.employee_id)}">${esc(e.employee_id)} — ${esc(e.full_name)}</option>`).join('')}</select></div><div class="field"><label>Pay month</label><input id="pay_month" type="month" value="${payrollMonth()}"></div><div class="field"><label>Basic salary</label><input id="pay_basic" type="number" step="0.01"></div><div class="field"><label>Allowances</label><input id="pay_allow" type="number" step="0.01" value="0"></div><div class="field"><label>Deductions</label><input id="pay_ded" type="number" step="0.01" value="0"></div><div class="full"><button onclick="savePayroll()">Save to Cloud</button></div></div></div>`;const emp=document.getElementById('pay_emp'),syncBasic=()=>{const e=state.employees.find(x=>x.employee_id===emp?.value);if(e)document.getElementById('pay_basic').value=Number(e.salary||0);};emp?.addEventListener('change',syncBasic);syncBasic();};
+  window.savePayroll=async function(){await api('POST','payroll',{employee_id:pay_emp.value,pay_month:pay_month.value,basic_salary:pay_basic.value,allowances:pay_allow.value,deductions:pay_ded.value});toast('Payroll saved');await refresh();};
+  const addressCache=new Map();async function gpsAddress(lat,lng){const key=`${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;if(addressCache.has(key))return addressCache.get(key);try{const r=await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}&localityLanguage=en`);if(!r.ok)throw Error();const d=await r.json(),parts=[d.locality,d.city,d.principalSubdivision,d.countryName].filter(Boolean),address=parts.join(', ')||`GPS: ${lat}, ${lng}`;addressCache.set(key,address);return address;}catch(_){return `GPS: ${lat}, ${lng}`;}}
+  function addGpsAddresses(){document.querySelectorAll('#content .table tbody tr').forEach(row=>{if(row.dataset.gpsDone)return;const text=Array.from(row.querySelectorAll('td')).map(td=>td.textContent||'').join(' '),m=text.match(/(-?\d{1,3}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})/);if(!m)return;row.dataset.gpsDone='1';const holder=document.createElement('div');holder.className='muted';holder.style.cssText='font-size:11px;margin-top:4px;white-space:normal;max-width:260px';holder.textContent='Getting address…';const cell=Array.from(row.querySelectorAll('td')).find(td=>(td.textContent||'').includes(m[0]));(cell||row.lastElementChild)?.appendChild(holder);gpsAddress(m[1],m[2]).then(x=>{holder.textContent='📍 '+x;});});}
+  const mins=v=>{const n=Number(v||0);return `${Math.floor(n/60)}h ${n%60}m`;};
+  const me=()=>JSON.parse(sessionStorage.getItem('fc_user')||'{}');
+  const gps=()=>new Promise(resolve=>{if(!navigator.geolocation)return resolve({});navigator.geolocation.getCurrentPosition(p=>resolve({latitude:p.coords.latitude,longitude:p.coords.longitude,accuracy:p.coords.accuracy}),()=>resolve({}),{enableHighAccuracy:true,timeout:12000,maximumAge:0});});
+  const escA=window.esc||((x)=>String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
+  window.viewAttendance=function(){const user=me(),rows=role==='EMPLOYEE'?(state.attendance||[]).filter(a=>a.employee_id===user.employeeId):(state.attendance||[]),today=new Date().toISOString().slice(0,10),mine=rows.find(a=>String(a.work_date).slice(0,10)===today);let controls='';if(role==='EMPLOYEE'){if(!mine)controls='<button onclick="fcAttendanceAction(\'checkin\')">Check In</button>';else if(!mine.check_out&&mine.break_start&&!mine.break_end)controls='<button onclick="fcAttendanceAction(\'break_end\')">End Break</button>';else if(!mine.check_out)controls=`<button onclick="fcAttendanceAction('break_start')">Start Break</button><button class="secondary" onclick="fcAttendanceAction('checkout')">Check Out</button>`;else controls='<span class="badge">Day completed</span>';}const employeeName=id=>{const x=(state.employees||[]).find(a=>a.employee_id===id);return x?x.full_name:id};const cards=role==='EMPLOYEE'&&mine?`<div style="padding:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div class="card"><b>Check In</b><div>${escA(mine.check_in||'—')}</div></div><div class="card"><b>Break</b><div>${mine.break_start?(mine.break_end?`${escA(mine.break_start)} → ${escA(mine.break_end)} (${mins(mine.break_duration_minutes)})`:`Started ${escA(mine.break_start)}`):'—'}</div></div><div class="card"><b>Check Out</b><div>${escA(mine.check_out||'—')}</div></div><div class="card"><b>Working</b><div>${mine.working_minutes?mins(mine.working_minutes):'—'}</div></div></div>`:'';const html=`<div class="section"><div class="section-head"><b>Attendance</b><div class="actions">${controls}</div></div>${cards}<div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Date</th><th>Check In</th><th>Check-in GPS</th><th>Break</th><th>Check Out</th><th>Checkout GPS</th><th>Working</th><th>Late</th><th>Early</th><th>Overtime</th><th>Night</th><th>Status</th></tr></thead><tbody>${rows.map(a=>`<tr><td>${escA(employeeName(a.employee_id))}</td><td>${escA(String(a.work_date).slice(0,10))}</td><td>${escA(a.check_in||'—')}</td><td>${a.latitude!=null?escA(`${a.latitude}, ${a.longitude}${a.checkin_accuracy?` ±${a.checkin_accuracy}m`:''}`):'—'}</td><td>${a.break_start?escA(a.break_end?`${a.break_start} → ${a.break_end} (${mins(a.break_duration_minutes)})`:`Started ${a.break_start}`):'—'}</td><td>${escA(a.check_out||'—')}</td><td>${a.checkout_latitude!=null?escA(`${a.checkout_latitude}, ${a.checkout_longitude}${a.checkout_accuracy?` ±${a.checkout_accuracy}m`:''}`):'—'}</td><td>${a.working_minutes?mins(a.working_minutes):'—'}</td><td>${a.late_minutes?mins(a.late_minutes):'0m'}</td><td>${a.early_checkout_minutes?mins(a.early_checkout_minutes):'0m'}</td><td>${a.overtime_minutes?mins(a.overtime_minutes):'0m'}</td><td>${a.night_minutes?mins(a.night_minutes):'0m'}</td><td><span class="badge">${escA(a.status||'')}</span></td></tr>`).join('')||'<tr><td colspan="13" class="empty">No attendance records.</td></tr>'}</tbody></table></div></div>`;setTimeout(addGpsAddresses,50);return html;};
+  window.fcAttendanceAction=async function(action){try{const pos=await gps();await api('POST','attendance',Object.assign({action},pos));toast(action==='checkin'?'Checked in with GPS':action==='checkout'?'Checked out with GPS':action==='break_start'?'Break started':'Break ended');await refresh();}catch(err){toast(err.message||'Attendance action failed');}};
+  function keyBytes(s){const pad='='.repeat((4-s.length%4)%4),raw=atob((s+pad).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));}
+  async function setupNotifications(){if(role!=='EMPLOYEE'||!('serviceWorker'in navigator)||!('PushManager'in window))return;try{const reg=await navigator.serviceWorker.register('/sw.js');const r=await fetch(API+'/push/public-key',{headers:{Authorization:'Bearer '+localStorage.getItem(tokenKey)}});if(!r.ok)return;const d=await r.json();if(!d.publicKey)return;let sub=await reg.pushManager.getSubscription();if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(d.publicKey)});const key=sub.toJSON();await api('POST','push/subscribe',{endpoint:key.endpoint,keys:key.keys});}catch(err){console.warn('Push setup:',err.message);}}
+  window.fcEnableNotifications=async function(){if(!('Notification'in window))return toast('This device does not support notifications');const p=await Notification.requestPermission();if(p==='granted'){await setupNotifications();toast('Notifications enabled');}else toast('Notification permission was not granted');};
+  const oldBoot=window.boot;window.boot=async function(user){await oldBoot(user);if(user.role==='EMPLOYEE')setTimeout(setupNotifications,500);};
+  const oldViewTasks=window.viewTasks;window.viewTasks=function(){const html=oldViewTasks();if(role==='EMPLOYEE')return `<div class="section"><div class="section-head"><b>Mobile Notifications</b><button onclick="fcEnableNotifications()">Enable Notifications</button></div><div style="padding:14px">Receive task assignments and task updates on this phone.</div></div>${html}`;return html;};
+  setTimeout(()=>{if(role==='EMPLOYEE')setupNotifications();},1500);
 })();

@@ -1,0 +1,37 @@
+(function(){
+  'use strict';
+  const e=window.esc||((x)=>String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
+  const me=()=>JSON.parse(sessionStorage.getItem('fc_user')||'{}');
+  const mins=(v)=>{const n=Number(v||0);return `${Math.floor(n/60)}h ${n%60}m`;};
+  const gps=()=>new Promise(resolve=>{if(!navigator.geolocation)return resolve({});navigator.geolocation.getCurrentPosition(p=>resolve({latitude:p.coords.latitude,longitude:p.coords.longitude,accuracy:p.coords.accuracy}),()=>resolve({}),{enableHighAccuracy:true,timeout:12000,maximumAge:0});});
+  window.viewAttendance=function(){
+    const user=me();const rows=role==='EMPLOYEE'?(state.attendance||[]).filter(a=>a.employee_id===user.employeeId):(state.attendance||[]);
+    const today=new Date().toISOString().slice(0,10);const mine=rows.find(a=>String(a.work_date).slice(0,10)===today);
+    let controls='';
+    if(role==='EMPLOYEE'){
+      if(!mine) controls='<button onclick="fcAttendanceAction(\'checkin\')">Check In</button>';
+      else if(!mine.check_out && mine.break_start && !mine.break_end) controls='<button onclick="fcAttendanceAction(\'break_end\')">End Break</button>';
+      else if(!mine.check_out) controls=`<button onclick="fcAttendanceAction('break_start')">Start Break</button><button class="secondary" onclick="fcAttendanceAction('checkout')">Check Out</button>`;
+      else controls='<span class="badge">Day completed</span>';
+    }
+    const employeeName=id=>{const x=(state.employees||[]).find(a=>a.employee_id===id);return x?x.full_name:id};
+    return `<div class="section"><div class="section-head"><b>Attendance</b><div class="actions">${controls}</div></div>${role==='EMPLOYEE'&&mine?`<div style="padding:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px"><div class="card"><b>Check In</b><div>${e(mine.check_in||'—')}</div></div><div class="card"><b>Break</b><div>${mine.break_start?(mine.break_end?`${e(mine.break_start)} → ${e(mine.break_end)} (${mins(mine.break_duration_minutes)})`:`Started ${e(mine.break_start)}`):'—'}</div></div><div class="card"><b>Check Out</b><div>${e(mine.check_out||'—')}</div></div><div class="card"><b>Working</b><div>${mine.working_minutes?mins(mine.working_minutes):'—'}</div></div></div>`:''}<div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Date</th><th>Check In</th><th>Check-in GPS</th><th>Break</th><th>Check Out</th><th>Checkout GPS</th><th>Working</th><th>Late</th><th>Early</th><th>Overtime</th><th>Night</th><th>Status</th></tr></thead><tbody>${rows.map(a=>`<tr><td>${e(employeeName(a.employee_id))}</td><td>${e(String(a.work_date).slice(0,10))}</td><td>${e(a.check_in||'—')}</td><td>${a.latitude!=null?e(`${a.latitude}, ${a.longitude}${a.checkin_accuracy?` ±${a.checkin_accuracy}m`:''}`):'—'}</td><td>${a.break_start?e(a.break_end?`${a.break_start} → ${a.break_end} (${mins(a.break_duration_minutes)})`:`Started ${a.break_start}`):'—'}</td><td>${e(a.check_out||'—')}</td><td>${a.checkout_latitude!=null?e(`${a.checkout_latitude}, ${a.checkout_longitude}${a.checkout_accuracy?` ±${a.checkout_accuracy}m`:''}`):'—'}</td><td>${a.working_minutes?mins(a.working_minutes):'—'}</td><td>${a.late_minutes?mins(a.late_minutes):'0m'}</td><td>${a.early_checkout_minutes?mins(a.early_checkout_minutes):'0m'}</td><td>${a.overtime_minutes?mins(a.overtime_minutes):'0m'}</td><td>${a.night_minutes?mins(a.night_minutes):'0m'}</td><td><span class="badge">${e(a.status||'')}</span></td></tr>`).join('')||'<tr><td colspan="13" class="empty">No attendance records.</td></tr>'}</tbody></table></div></div>`;
+  };
+  window.fcAttendanceAction=async function(action){
+    try{const pos=await gps();await api('POST','attendance',Object.assign({action},pos));toast(action==='checkin'?'Checked in with GPS':action==='checkout'?'Checked out with GPS':action==='break_start'?'Break started':'Break ended');await refresh();}catch(err){toast(err.message||'Attendance action failed');}
+  };
+  async function setupNotifications(){
+    if(role!=='EMPLOYEE'||!('serviceWorker' in navigator)||!('PushManager' in window))return;
+    try{
+      const reg=await navigator.serviceWorker.register('/sw.js');
+      const r=await fetch(API+'/push/public-key',{headers:{Authorization:'Bearer '+localStorage.getItem(tokenKey)}});if(!r.ok)return;const d=await r.json();if(!d.publicKey)return;
+      let sub=await reg.pushManager.getSubscription();if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey=Uint8Array.from(atob(d.publicKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0))});
+      const key=sub.toJSON();await api('POST','push/subscribe',{endpoint:key.endpoint,keys:key.keys});
+      if(Notification.permission==='granted')return;
+    }catch(err){console.warn('Push setup:',err.message);}
+  }
+  window.fcEnableNotifications=async function(){if(!('Notification' in window))return toast('This device does not support notifications');const p=await Notification.requestPermission();if(p==='granted'){await setupNotifications();toast('Notifications enabled');}else toast('Notification permission was not granted');};
+  const oldBoot=window.boot;window.boot=async function(user){await oldBoot(user);if(user.role==='EMPLOYEE')setTimeout(setupNotifications,500);};
+  const oldViewTasks=window.viewTasks;window.viewTasks=function(){const html=oldViewTasks();if(role==='EMPLOYEE')return `<div class="section"><div class="section-head"><b>Mobile Notifications</b><button onclick="fcEnableNotifications()">Enable Notifications</button></div><div style="padding:14px">Receive task assignments and task updates on this phone.</div></div>${html}`;return html;};
+  setTimeout(()=>{if(role==='EMPLOYEE')setupNotifications();},1500);
+})();

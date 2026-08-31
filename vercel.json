@@ -5,29 +5,18 @@
   "buildCommand": null,
   "outputDirectory": ".",
   "functions": {
-    "api/index.js": {
-      "maxDuration": 30
-    },
-    "api/hrms.js": {
-      "maxDuration": 30
-    }
+    "api/index.js": {"maxDuration": 30},
+    "api/hrms.js": {"maxDuration": 30},
+    "api/cron/attendance-reminder.js": {"maxDuration": 30}
   },
+  "crons": [
+    {"path": "/api/cron/attendance-reminder", "schedule": "15 5 * * *"}
+  ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index?path=$1"
-    },
-    {
-      "src": "/$",
-      "dest": "/api/index?path=__app__"
-    }
+    {"src":"/api/(.*)","dest":"/api/index?path=$1"},
+    {"src":"/$","dest":"/api/index?path=__app__"}
   ],
   "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-store, max-age=0" }
-      ]
-    }
+    {"source":"/api/(.*)","headers":[{"key":"Cache-Control","value":"no-store, max-age=0"}]}
   ]
 }

@@ -8,11 +8,13 @@
     "api/index.js": {"maxDuration": 30},
     "api/hrms.js": {"maxDuration": 30},
     "api/cron/attendance-reminder.js": {"maxDuration": 30},
-    "api/push/public-key.js": {"maxDuration": 30}
+    "api/push/public-key.js": {"maxDuration": 30},
+    "api/push/subscribe.js": {"maxDuration": 30}
   },
   "crons": [{"path":"/api/cron/attendance-reminder","schedule":"15 5 * * *"}],
   "routes": [
     {"src":"/api/push/public-key","dest":"/api/push/public-key.js"},
+    {"src":"/api/push/subscribe","dest":"/api/push/subscribe.js"},
     {"src":"/api/cron/attendance-reminder","dest":"/api/cron/attendance-reminder.js"},
     {"src":"/api/(.*)","dest":"/api/index?path=$1"},
     {"src":"/$","dest":"/api/index?path=__app__"}

@@ -2,8 +2,9 @@
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   function token(){return localStorage.getItem('fc_hrms_token')||'';}
   function user(){try{return JSON.parse(sessionStorage.getItem('fc_user')||'null')}catch(_){return null}}
+  function isEmployee(){const u=user();return u&&u.role==='EMPLOYEE'}
   function addBanner(){
-    if(!window.role||window.role!=='EMPLOYEE'||document.getElementById('pushNotifyCard'))return;
+    if(!isEmployee()||document.getElementById('pushNotifyCard'))return;
     const content=document.getElementById('content');if(!content)return;
     const box=document.createElement('div');box.id='pushNotifyCard';box.className='section';box.innerHTML='<div class="section-head"><b>📱 Mobile Notifications</b><button id="enablePushBtn">Enable Notifications</button></div><div id="pushNotifyMsg" style="padding:14px">Enable notifications to receive task assignments and attendance reminders even when the HRMS is closed.</div>';
     content.prepend(box);
@@ -29,6 +30,6 @@
       localStorage.setItem('fc_push_enabled','1');markEnabled();msg.textContent='Notifications are enabled. You can close the HRMS; task notifications can now arrive on this phone.';
     }catch(e){btn.disabled=false;btn.textContent='Try Again';msg.textContent=e.message||'Notification setup failed.';}
   }
-  async function init(){for(let i=0;i<20;i++){if(window.role&&document.getElementById('content')){addBanner();return}await sleep(500)}addBanner()}
+  async function init(){for(let i=0;i<20;i++){if(isEmployee()&&document.getElementById('content')){addBanner();return}await sleep(500)}addBanner()}
   const obs=new MutationObserver(()=>addBanner());obs.observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('load',init);init();
 })();

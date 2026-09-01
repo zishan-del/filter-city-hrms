@@ -42,7 +42,7 @@
   function requireGps(){
     return new Promise(function(resolve, reject){
       if(!navigator.geolocation){
-        reject(new Error('GPS is not available on this device. Please enable Location/GPS.'));
+        reject(new Error('Location/GPS is not available on this device. Turn on Location and try again.'));
         return;
       }
       navigator.geolocation.getCurrentPosition(
@@ -50,10 +50,10 @@
           resolve({latitude:p.coords.latitude, longitude:p.coords.longitude, accuracy:p.coords.accuracy});
         },
         function(err){
-          var msg = 'Could not get GPS location. Please try again.';
-          if(err && err.code === 1) msg = 'Location permission is blocked. Allow Location for FILTER CITY HRMS and try again.';
-          else if(err && err.code === 2) msg = 'GPS location is unavailable. Turn on Location/GPS and try again.';
-          else if(err && err.code === 3) msg = 'GPS request timed out. Please go near a window/outdoor area and try again.';
+          var msg = 'Could not get your location. Turn on Location/GPS and allow Location for FILTER CITY HRMS, then try again.';
+          if(err && err.code === 1) msg = 'Location is off or access is blocked. Turn on Location/GPS and allow Location for FILTER CITY HRMS, then try again.';
+          else if(err && err.code === 2) msg = 'Location is unavailable. Turn on Location/GPS, wait a few seconds, then try again.';
+          else if(err && err.code === 3) msg = 'GPS request timed out. Keep Location/GPS on and try again near a window or outdoor area.';
           reject(new Error(msg));
         },
         {enableHighAccuracy:true, timeout:15000, maximumAge:0}

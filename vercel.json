@@ -6,6 +6,7 @@
   "outputDirectory": ".",
   "functions": {
     "api/index.js": {"maxDuration": 30},
+    "api/app-dev.js": {"maxDuration": 30},
     "api/hrms.js": {"maxDuration": 30},
     "api/auth/login.js": {"maxDuration": 30},
     "api/cron/attendance-reminder.js": {"maxDuration": 30},
@@ -25,7 +26,7 @@
     {"src":"/api/cron/attendance-reminder","dest":"/api/cron/attendance-reminder.js"},
     {"src":"/api/auth/login","dest":"/api/auth/login.js"},
     {"src":"/api/(.*)","dest":"/api/index?path=$1"},
-    {"src":"/$","dest":"/api/index?path=__app__"}
+    {"src":"/$","dest":"/api/app-dev.js"}
   ],
   "headers": [{"source":"/api/(.*)","headers":[{"key":"Cache-Control","value":"no-store, max-age=0"}]}]
 }

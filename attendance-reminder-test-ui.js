@@ -3,7 +3,7 @@
 
   const escT = window.esc || function(x){
     return String(x == null ? '' : x).replace(/[&<>"']/g,function(m){
-      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[m];
     });
   };
 
@@ -108,8 +108,40 @@
     }
   }
 
+  async function cleanupSubscriptions(){
+    const select=document.getElementById('fc_test_att_employee');
+    const msg=document.getElementById('fc_cleanup_msg');
+    const btn=document.getElementById('fc_cleanup_btn');
+    if(!select||!select.value){if(msg)msg.textContent='Please select an employee first.';return;}
+    if(!confirm('Remove old duplicate notification registrations for this employee and keep only the newest one?'))return;
+    try{
+      btn.disabled=true;
+      btn.textContent='Cleaning...';
+      msg.textContent='Removing old duplicate Preview notification registrations...';
+      const r=await fetch('/api/push/cleanup-subscriptions',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem('fc_hrms_token')},
+        body:JSON.stringify({employee_id:select.value})
+      });
+      const d=await r.json().catch(function(){return {};});
+      if(!r.ok)throw Error(d.error||'Notification cleanup failed');
+      msg.textContent='Cleanup complete for '+(d.employee_name||select.value)+': '+d.before+' registration(s) → '+d.remaining+'. Removed '+d.removed+' old registration(s).';
+      if(typeof toast==='function')toast('Old notification registrations cleaned');
+      const scenario=document.getElementById('fc_test_att_scenario');
+      if(scenario)scenario.value='live';
+      await checkLogic();
+    }catch(e){
+      msg.textContent=e.message||'Notification cleanup failed';
+      if(typeof toast==='function')toast(e.message||'Notification cleanup failed');
+    }finally{
+      btn.disabled=false;
+      btn.textContent='Clean Old Preview Registrations';
+    }
+  }
+
   window.fcCheckAttendanceReminderLogic=checkLogic;
   window.fcSendAttendanceTest=sendTest;
+  window.fcCleanupPushSubscriptions=cleanupSubscriptions;
 
   const previous=window.viewAttendance;
   window.viewAttendance=function(){
@@ -144,6 +176,11 @@
         '<div class="muted" style="margin-bottom:10px">This button sends one real Attendance Reminder only to the selected employee. It is separate from the automatic-rule dry run.</div>'+
         '<button id="fc_test_att_btn" onclick="fcSendAttendanceTest()" '+disabled+'>Send Test Reminder</button>'+
         '<div id="fc_test_att_msg" class="muted" style="margin-top:10px">No real test sent.</div>'+
+        '<div style="border-top:1px solid #e4e9ef;margin:18px 0"></div>'+
+        '<div style="font-weight:700;margin-bottom:7px">3. Preview Notification Cleanup</div>'+
+        '<div class="muted" style="margin-bottom:10px">Removes old duplicate Preview notification registrations for the selected employee and keeps only the newest registration. Attendance and employee records are not changed.</div>'+
+        '<button id="fc_cleanup_btn" class="secondary" onclick="fcCleanupPushSubscriptions()" '+disabled+'>Clean Old Preview Registrations</button>'+
+        '<div id="fc_cleanup_msg" class="muted" style="margin-top:10px">No cleanup performed yet.</div>'+
       '</div>'+
     '</div>';
 

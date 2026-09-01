@@ -13,6 +13,10 @@
   },
   "crons": [{"path":"/api/cron/attendance-reminder","schedule":"15 5 * * *"}],
   "routes": [
+    {"src":"/sw.js","dest":"/public/sw.js"},
+    {"src":"/service-worker.js","dest":"/public/service-worker.js"},
+    {"src":"/manifest.webmanifest","dest":"/public/manifest.webmanifest"},
+    {"src":"/notifications.js","dest":"/public/notifications.js"},
     {"src":"/api/push/public-key","dest":"/api/push/public-key.js"},
     {"src":"/api/push/subscribe","dest":"/api/push/subscribe.js"},
     {"src":"/api/cron/attendance-reminder","dest":"/api/cron/attendance-reminder.js"},

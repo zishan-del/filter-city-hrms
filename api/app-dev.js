@@ -6,8 +6,9 @@ module.exports=async(req,res)=>{
     const taskUi=fs.readFileSync(path.join(process.cwd(),'task-photo-ui.js'),'utf8');
     const leaveUi=fs.readFileSync(path.join(process.cwd(),'leave-reason-ui.js'),'utf8');
     const payrollUi=fs.readFileSync(path.join(process.cwd(),'payroll-ui.js'),'utf8');
+    const attendanceFix=fs.readFileSync(path.join(process.cwd(),'employee-attendance-fix.js'),'utf8');
     const reminderUi=fs.readFileSync(path.join(process.cwd(),'attendance-reminder-test-ui.js'),'utf8');
-    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${reminderUi}\n</script>\n</body>`);
+    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n</body>`);
     res.statusCode=200;
     res.setHeader('Content-Type','text/html; charset=utf-8');
     res.setHeader('Cache-Control','no-store, max-age=0');

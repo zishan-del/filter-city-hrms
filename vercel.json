@@ -12,7 +12,8 @@
     "api/cron/attendance-reminder.js": {"maxDuration": 30},
     "api/push/public-key.js": {"maxDuration": 30},
     "api/push/subscribe.js": {"maxDuration": 30},
-    "api/push/test-attendance.js": {"maxDuration": 30}
+    "api/push/test-attendance.js": {"maxDuration": 30},
+    "api/push/reminder-logic-test.js": {"maxDuration": 30}
   },
   "crons": [{"path":"/api/cron/attendance-reminder","schedule":"15 5 * * *"}],
   "routes": [
@@ -23,6 +24,7 @@
     {"src":"/api/push/public-key","dest":"/api/push/public-key.js"},
     {"src":"/api/push/subscribe","dest":"/api/push/subscribe.js"},
     {"src":"/api/push/test-attendance","dest":"/api/push/test-attendance.js"},
+    {"src":"/api/push/reminder-logic-test","dest":"/api/push/reminder-logic-test.js"},
     {"src":"/api/cron/attendance-reminder","dest":"/api/cron/attendance-reminder.js"},
     {"src":"/api/auth/login","dest":"/api/auth/login.js"},
     {"src":"/api/(.*)","dest":"/api/index?path=$1"},

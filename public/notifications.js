@@ -1,35 +1,45 @@
 (()=>{
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-  function token(){return localStorage.getItem('fc_hrms_token')||'';}
-  function user(){try{return JSON.parse(sessionStorage.getItem('fc_user')||'null')}catch(_){return null}}
-  function isEmployee(){const u=user();return u&&u.role==='EMPLOYEE'}
-  function addBanner(){
-    if(!isEmployee()||document.getElementById('pushNotifyCard'))return;
-    const content=document.getElementById('content');if(!content)return;
-    const box=document.createElement('div');box.id='pushNotifyCard';box.className='section';box.innerHTML='<div class="section-head"><b>📱 Mobile Notifications</b><button id="enablePushBtn">Enable Notifications</button></div><div id="pushNotifyMsg" style="padding:14px">Enable notifications to receive task assignments and attendance reminders even when the HRMS is closed.</div>';
-    content.prepend(box);
-    document.getElementById('enablePushBtn').onclick=enable;
-    if(localStorage.getItem('fc_push_enabled')==='1') markEnabled();
+  const token=()=>localStorage.getItem('fc_hrms_token')||'';
+  const user=()=>{try{return JSON.parse(sessionStorage.getItem('fc_user')||'null')}catch(_){return null}};
+  const isEmployee=()=>{const u=user();return u&&u.role==='EMPLOYEE'};
+  const base64ToBytes=s=>{const pad='='.repeat((4-s.length%4)%4);const raw=atob((s+pad).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(raw,c=>c.charCodeAt(0));};
+  function setMessage(box,text,error=false){const m=box?.querySelector('[data-push-msg]');if(m){m.textContent=text;m.style.color=error?'#b42318':'';}}
+  function setButton(box,text,disabled=false){const b=box?.querySelector('[data-push-btn]');if(b){b.textContent=text;b.disabled=disabled;}}
+  function findExisting(){return [...document.querySelectorAll('.section')].find(s=>/Mobile Notifications/i.test(s.textContent||'')&&s.querySelector('button'))||null;}
+  function ensureCard(){
+    if(!isEmployee())return null;
+    const existing=findExisting();
+    if(existing){
+      const btn=existing.querySelector('button');
+      const msg=[...existing.querySelectorAll('div')].find(x=>/Receive task assignments|Notifications are enabled|Push notifications/i.test(x.textContent||''));
+      if(btn)btn.setAttribute('data-push-btn','1');
+      if(msg)msg.setAttribute('data-push-msg','1');
+      return existing;
+    }
+    const content=document.getElementById('content');if(!content)return null;
+    const box=document.createElement('div');box.className='section';box.innerHTML='<div class="section-head"><b>📱 Mobile Notifications</b><button data-push-btn="1">Enable Notifications</button></div><div data-push-msg="1" style="padding:14px">Receive task assignments and attendance reminders even when the HRMS is closed.</div>';
+    content.prepend(box);return box;
   }
-  function markEnabled(){const b=document.getElementById('enablePushBtn'),m=document.getElementById('pushNotifyMsg');if(b){b.textContent='Notifications Enabled';b.disabled=true}if(m)m.textContent='Your phone is registered for FILTER CITY HRMS push notifications.';}
-  function base64ToBytes(s){const pad='='.repeat((4-s.length%4)%4);const raw=atob((s+pad).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(raw,c=>c.charCodeAt(0));}
-  async function enable(){
-    const msg=document.getElementById('pushNotifyMsg'),btn=document.getElementById('enablePushBtn');
+  async function enable(box){
     try{
       if(!('serviceWorker'in navigator))throw Error('This browser does not support background notifications.');
       if(!('PushManager'in window))throw Error('Push notifications are not supported on this browser.');
       if(!window.isSecureContext)throw Error('Notifications require the secure HRMS link (HTTPS).');
-      btn.disabled=true;btn.textContent='Enabling...';msg.textContent='Requesting notification permission...';
+      setButton(box,'Enabling...',true);setMessage(box,'Requesting notification permission...');
       const permission=Notification.permission==='granted'?'granted':await Notification.requestPermission();
       if(permission!=='granted')throw Error('Notification permission was not granted.');
-      msg.textContent='Registering your phone...';
+      setMessage(box,'Registering your phone...');
       const reg=await navigator.serviceWorker.register('/sw.js',{scope:'/'});await navigator.serviceWorker.ready;
-      const keyRes=await fetch('/api/push/public-key',{headers:{Authorization:'Bearer '+token()}});const keyData=await keyRes.json();if(!keyRes.ok)throw Error(keyData.error||'Push service is not configured.');
+      const keyRes=await fetch('/api/push/public-key',{headers:{Authorization:'Bearer '+token()}});const keyData=await keyRes.json().catch(()=>({}));
+      if(!keyRes.ok)throw Error(keyData.error||'Push service is not configured.');
       let sub=await reg.pushManager.getSubscription();if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:base64ToBytes(keyData.publicKey)});
-      const r=await fetch('/api/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},body:JSON.stringify(sub.toJSON())});const d=await r.json();if(!r.ok)throw Error(d.error||'Could not register this phone.');
-      localStorage.setItem('fc_push_enabled','1');markEnabled();msg.textContent='Notifications are enabled. You can close the HRMS; task notifications can now arrive on this phone.';
-    }catch(e){btn.disabled=false;btn.textContent='Try Again';msg.textContent=e.message||'Notification setup failed.';}
+      const r=await fetch('/api/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},body:JSON.stringify(sub.toJSON())});const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw Error(d.error||'Could not register this phone.');
+      localStorage.setItem('fc_push_enabled','1');setButton(box,'Notifications Enabled',true);setMessage(box,'Notifications are enabled. You can close the HRMS; task notifications can now arrive on this phone.');
+    }catch(e){setButton(box,'Enable Notifications',false);setMessage(box,e.message||'Notification setup failed.',true);}
   }
-  async function init(){for(let i=0;i<20;i++){if(isEmployee()&&document.getElementById('content')){addBanner();return}await sleep(500)}addBanner()}
-  const obs=new MutationObserver(()=>addBanner());obs.observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('load',init);init();
+  function wire(){const box=ensureCard();if(!box)return;const btn=box.querySelector('[data-push-btn]');if(!btn||btn.dataset.wired==='1')return;btn.dataset.wired='1';btn.onclick=()=>enable(box);if(localStorage.getItem('fc_push_enabled')==='1'){setButton(box,'Notifications Enabled',true);setMessage(box,'This phone is registered for FILTER CITY HRMS push notifications.');}}
+  async function init(){for(let i=0;i<20;i++){if(isEmployee()&&document.getElementById('content')){wire();return}await sleep(500)}wire();}
+  const obs=new MutationObserver(()=>wire());obs.observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('load',init);init();
 })();

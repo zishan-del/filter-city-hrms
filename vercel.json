@@ -7,6 +7,7 @@
   "functions": {
     "api/index.js": {"maxDuration": 30},
     "api/hrms.js": {"maxDuration": 30},
+    "api/auth/login.js": {"maxDuration": 30},
     "api/cron/attendance-reminder.js": {"maxDuration": 30},
     "api/push/public-key.js": {"maxDuration": 30},
     "api/push/subscribe.js": {"maxDuration": 30}
@@ -20,6 +21,7 @@
     {"src":"/api/push/public-key","dest":"/api/push/public-key.js"},
     {"src":"/api/push/subscribe","dest":"/api/push/subscribe.js"},
     {"src":"/api/cron/attendance-reminder","dest":"/api/cron/attendance-reminder.js"},
+    {"src":"/api/auth/login","dest":"/api/auth/login.js"},
     {"src":"/api/(.*)","dest":"/api/index?path=$1"},
     {"src":"/$","dest":"/api/index?path=__app__"}
   ],

@@ -76,7 +76,7 @@ module.exports=async(req,res)=>{
     const [holidayRows,attendanceRows,leaveRows,subscriptionRows,logged]=await Promise.all([
       sql`SELECT id FROM holidays WHERE holiday_date=${today} LIMIT 1`,
       sql`SELECT id FROM attendance WHERE employee_id=${employeeId} AND work_date=${today} AND check_in IS NOT NULL LIMIT 1`,
-      sql`SELECT id FROM leaves WHERE employee_id=${employeeId} AND status='Approved' AND start_date<=${today} AND end_date>=${today} LIMIT 1`,
+      sql`SELECT id FROM leave_requests WHERE employee_id=${employeeId} AND status='Approved' AND start_date<=${today} AND end_date>=${today} LIMIT 1`,
       sql`SELECT id FROM push_subscriptions WHERE employee_id=${employeeId}`,
       reminderLogged(employeeId,today)
     ]);

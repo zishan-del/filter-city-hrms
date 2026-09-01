@@ -28,17 +28,13 @@ async function sendPush(employeeId,payload){
 }
 
 async function onApprovedLeave(employeeId,today){
-  try{
-    const rows=await sql`SELECT id FROM leaves WHERE employee_id=${employeeId} AND status='Approved' AND start_date<=${today} AND end_date>=${today} LIMIT 1`;
-    return rows.length>0;
-  }catch(_){return false;}
+  const rows=await sql`SELECT id FROM leave_requests WHERE employee_id=${employeeId} AND status='Approved' AND start_date<=${today} AND end_date>=${today} LIMIT 1`;
+  return rows.length>0;
 }
 
 async function isHoliday(today){
-  try{
-    const rows=await sql`SELECT id FROM holidays WHERE holiday_date=${today} LIMIT 1`;
-    return rows.length>0;
-  }catch(_){return false;}
+  const rows=await sql`SELECT id FROM holidays WHERE holiday_date=${today} LIMIT 1`;
+  return rows.length>0;
 }
 
 module.exports=async(req,res)=>{

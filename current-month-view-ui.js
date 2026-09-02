@@ -61,7 +61,7 @@
 
   function scopedRecords(page){
     const u=currentUser(),id=u.employeeId;
-    if(!window.state)return [];
+    if(typeof state==='undefined'||!state)return [];
     if(page==='Attendance'){
       const rows=Array.isArray(state.attendance)?state.attendance:[];
       return isEmployee()?rows.filter(x=>x.employee_id===id):rows;
@@ -136,8 +136,8 @@
     if(!table)return;
     const body=table.querySelector('tbody');
     if(!body)return;
-    body.querySelectorAll('tr[data-fc-step6-empty="1"]').forEach(row=>row.remove());
-    const allRows=[...body.querySelectorAll(':scope > tr')];
+    let monthEmpty=body.querySelector('tr[data-fc-step6-empty="1"]');
+    const allRows=[...body.querySelectorAll(':scope > tr')].filter(row=>row!==monthEmpty);
     const dataRows=allRows.filter(row=>row.querySelectorAll('td').length>1);
     const genericEmpty=allRows.filter(row=>row.querySelectorAll('td').length===1);
     genericEmpty.forEach(row=>row.style.display='none');
@@ -148,15 +148,22 @@
       row.style.display=show?'':'none';
       if(show)visible++;
     });
-    if(!visible){
-      const tr=document.createElement('tr');
-      tr.dataset.fcStep6Empty='1';
+    if(visible){
+      if(monthEmpty)monthEmpty.remove();
+      return;
+    }
+    if(!monthEmpty){
+      monthEmpty=document.createElement('tr');
+      monthEmpty.dataset.fcStep6Empty='1';
       const td=document.createElement('td');
-      td.colSpan=Math.max(1,table.querySelectorAll('thead th').length);
       td.className='empty';
+      monthEmpty.appendChild(td);
+      body.appendChild(monthEmpty);
+    }
+    const td=monthEmpty.querySelector('td');
+    if(td){
+      td.colSpan=Math.max(1,table.querySelectorAll('thead th').length);
       td.textContent='No '+page.toLowerCase()+' records for '+monthLabel(month)+'.';
-      tr.appendChild(td);
-      body.appendChild(tr);
     }
   }
 

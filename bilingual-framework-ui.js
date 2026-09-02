@@ -20,7 +20,9 @@
     'Cloud connection':'الاتصال السحابي',
     'Connected to PostgreSQL':'متصل بقاعدة البيانات',
     'All information below is loaded from the cloud database.':'جميع المعلومات أدناه محملة من قاعدة البيانات السحابية.',
-    'PC and mobile use the same API and database. Browser local storage is used only for the login token, never for HRMS records.':'يستخدم الكمبيوتر والجوال نفس واجهة النظام وقاعدة البيانات. يتم استخدام التخزين المحلي في المتصفح فقط لرمز تسجيل الدخول وليس لسجلات الموارد البشرية.'
+    'PC and mobile use the same API and database. Browser local storage is used only for the login token, never for HRMS records.':'يستخدم الكمبيوتر والجوال نفس واجهة النظام وقاعدة البيانات. يتم استخدام التخزين المحلي في المتصفح فقط لرمز تسجيل الدخول وليس لسجلات الموارد البشرية.',
+    'Default admin: admin@filtercity.com / Admin@12345':'المسؤول الافتراضي: admin@filtercity.com / Admin@12345',
+    'Employee credentials are created by Admin.':'يتم إنشاء بيانات دخول الموظف بواسطة المسؤول.'
   };
 
   const style=document.createElement('style');
@@ -105,6 +107,8 @@
 
   function applyLanguage(lang){
     const ar=lang==='ar';
+    const k=userKey();
+    if(k&&!localStorage.getItem(k))localStorage.setItem(k,lang);
     document.documentElement.lang=ar?'ar':'en';
     document.documentElement.dir=ar?'rtl':'ltr';
     document.body.classList.toggle('fc-lang-ar',ar);
@@ -113,12 +117,6 @@
     translateExact(document.getElementById('login'),ar);
     translateExact(document.getElementById('app'),ar);
     translateDashboard(ar);
-    const pageTitle=document.getElementById('pageTitle');
-    if(pageTitle){
-      const page=String(window.current||pageTitle.dataset.fcPageEn||pageTitle.textContent||'Dashboard');
-      if(ar){pageTitle.dataset.fcPageEn=pages[page]?page:(pageTitle.dataset.fcPageEn||page);pageTitle.textContent=pages[pageTitle.dataset.fcPageEn]||pageTitle.textContent;}
-      else if(pageTitle.dataset.fcPageEn){pageTitle.textContent=pageTitle.dataset.fcPageEn;delete pageTitle.dataset.fcPageEn;}
-    }
     document.title=ar?'فلتر سيتي للتجارة - نظام الموارد البشرية':'FILTER CITY TRADING CO. HRMS';
   }
 

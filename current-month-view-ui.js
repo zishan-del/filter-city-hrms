@@ -105,6 +105,11 @@
     })||null;
   }
 
+  function toolbarNote(page,month){
+    const attendanceNote=page==='Attendance'?' Today’s check-in/break/check-out controls stay live; the history table below follows the selected month.':'';
+    return 'Showing '+monthLabel(month)+'. Old records are kept; choose another month to view history.'+attendanceNote;
+  }
+
   function addToolbar(page,month){
     const content=document.getElementById('content');
     if(!content)return;
@@ -115,20 +120,23 @@
     box.id='fcStep6MonthToolbar';
     box.dataset.page=page;
     box.className='section';
-    const attendanceNote=page==='Attendance'?' Today’s check-in/break/check-out controls stay live; the history table below follows the selected month.':'';
     box.innerHTML='<div class="section-head"><b>📅 Current Month View — Step 6</b><span class="badge">Saudi/Riyadh</span></div>'+ 
       '<div style="padding:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
         '<label for="fcStep6MonthPicker" style="font-weight:700">Month</label>'+ 
         '<input id="fcStep6MonthPicker" type="month" value="'+escM(month)+'" style="padding:9px;border:1px solid #c9d2dd;border-radius:8px;background:#fff">'+
-        '<span class="muted">Showing '+escM(monthLabel(month))+'. Old records are kept; choose another month to view history.'+escM(attendanceNote)+'</span>'+ 
+        '<span id="fcStep6MonthText" class="muted">'+escM(toolbarNote(page,month))+'</span>'+ 
       '</div>';
     content.prepend(box);
     const picker=document.getElementById('fcStep6MonthPicker');
-    if(picker)picker.addEventListener('change',function(){
-      if(!this.value)return;
-      sessionStorage.setItem(storageKey(page),this.value);
-      applyPage(page);
-    });
+    if(picker){
+      const useMonth=function(){
+        if(!this.value)return;
+        sessionStorage.setItem(storageKey(page),this.value);
+        applyPage(page);
+      };
+      picker.addEventListener('input',useMonth);
+      picker.addEventListener('change',useMonth);
+    }
   }
 
   function filterTable(page,month){
@@ -173,6 +181,8 @@
     addToolbar(page,month);
     const picker=document.getElementById('fcStep6MonthPicker');
     if(picker && picker.value!==month)picker.value=month;
+    const note=document.getElementById('fcStep6MonthText');
+    if(note)note.textContent=toolbarNote(page,month);
     filterTable(page,month);
   }
 

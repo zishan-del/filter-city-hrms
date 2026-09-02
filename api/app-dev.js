@@ -1,11 +1,11 @@
 const fs=require('fs');
 const path=require('path');
 const attendanceCorrectionApi=require('../attendance-correction-api.js');
-// Step 9B Preview shell: stable Step 9A plus permanent attendance correction/audit reporting.
+// Step 9B.1 Preview shell: stable Step 9B plus safe admin-login rename preparation.
 module.exports=async(req,res)=>{
   if(String(req.url||'').includes('fc_mode=attendance-correction'))return attendanceCorrectionApi(req,res);
   try{
-    const html=fs.readFileSync(path.join(process.cwd(),'index.html'),'utf8');
+    const html=fs.readFileSync(path.join(process.cwd(),'index.html'),'utf8').replaceAll('admin@company.com','admin@filtercity.com');
     const taskUi=fs.readFileSync(path.join(process.cwd(),'task-photo-ui.js'),'utf8');
     const leaveUi=fs.readFileSync(path.join(process.cwd(),'leave-reason-ui.js'),'utf8');
     const payrollUi=fs.readFileSync(path.join(process.cwd(),'payroll-ui.js'),'utf8');

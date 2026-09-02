@@ -2,6 +2,9 @@ const { neon } = require('@neondatabase/serverless');
 const crypto = require('crypto');
 const sql = neon(process.env.DATABASE_URL);
 
+const ADMIN_LOGIN='admin@filtercity.com';
+const LEGACY_ADMIN_LOGIN='admin@company.com';
+
 function hash(value){
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
@@ -43,13 +46,20 @@ module.exports=async(req,res)=>{
     const role=String(body.role||'').trim().toUpperCase();
     if(!username||!password||!['ADMIN','EMPLOYEE'].includes(role)) return send(res,400,{error:'Username, password and valid role are required'});
 
-    const rows=await sql`SELECT id,username,password_hash,role,employee_id,active FROM users WHERE lower(username)=lower(${username}) AND role=${role} LIMIT 1`;
+    let lookupUsername=username;
+    if(role==='ADMIN'){
+      if(username.toLowerCase()!==ADMIN_LOGIN) return send(res,401,{error:'Invalid username or password'});
+      lookupUsername=LEGACY_ADMIN_LOGIN;
+    }
+
+    const rows=await sql`SELECT id,username,password_hash,role,employee_id,active FROM users WHERE lower(username)=lower(${lookupUsername}) AND role=${role} LIMIT 1`;
     if(!rows.length||!rows[0].active||rows[0].password_hash!==hash(password)) return send(res,401,{error:'Invalid username or password'});
 
     const user=rows[0];
+    const displayUsername=role==='ADMIN'?ADMIN_LOGIN:user.username;
     return send(res,200,{
       token:makeToken(user),
-      user:{id:user.id,username:user.username,role:user.role,employeeId:user.employee_id||null}
+      user:{id:user.id,username:displayUsername,role:user.role,employeeId:user.employee_id||null}
     });
   }catch(error){
     console.error('Login error:',error);

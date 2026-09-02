@@ -4,6 +4,7 @@
   window.__fcAttendanceRulesStep7B=true;
 
   let schedules=[];
+  let history=[];
   let schedulesLoaded=false;
   let schedulesLoading=false;
 
@@ -50,21 +51,28 @@
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw Error(d.error||'Could not load work schedules');
       schedules=Array.isArray(d.schedules)?d.schedules:[];
+      history=Array.isArray(d.history)?d.history:[];
       schedulesLoaded=true;
     }catch(e){
-      console.error('Step 7B schedule load failed',e);
+      console.error('Step 7B/7E schedule load failed',e);
     }finally{
       schedulesLoading=false;
     }
   }
 
-  function scheduleFor(employeeId){return schedules.find(s=>s.employee_id===employeeId&&s.start_time&&s.end_time)||null;}
+  function scheduleFor(employeeId,date){
+    const versions=history
+      .filter(s=>s.employee_id===employeeId&&s.start_time&&s.end_time&&dateOnly(s.effective_from)<=date)
+      .sort((a,b)=>dateOnly(b.effective_from).localeCompare(dateOnly(a.effective_from)));
+    if(versions.length)return versions[0];
+    return schedules.find(s=>s.employee_id===employeeId&&s.start_time&&s.end_time)||null;
+  }
   function attendanceFor(employeeId,date){return (state.attendance||[]).find(a=>a.employee_id===employeeId&&dateOnly(a.work_date)===date)||null;}
   function approvedLeave(employeeId,date){return (state.leaves||[]).find(l=>l.employee_id===employeeId&&String(l.status||'').toLowerCase()==='approved'&&dateOnly(l.start_date)<=date&&dateOnly(l.end_date)>=date)||null;}
   function holidayFor(date){return (state.holidays||[]).find(h=>dateOnly(h.holiday_date)===date)||null;}
 
   function evaluate(employeeId,date){
-    const schedule=scheduleFor(employeeId);
+    const schedule=scheduleFor(employeeId,date);
     const attendance=attendanceFor(employeeId,date);
     const holiday=holidayFor(date);
     const leave=approvedLeave(employeeId,date);
@@ -72,7 +80,7 @@
     const now=riyadhNow();
 
     if(!schedule){
-      return {kind:'NO_SCHEDULE',employeeId,date,weekday,attendance,message:'No work schedule is configured for this employee.'};
+      return {kind:'NO_SCHEDULE',employeeId,date,weekday,attendance,message:'No work schedule version was effective on this date.'};
     }
 
     const workDays=String(schedule.work_days||'').split(',').filter(Boolean);
@@ -142,7 +150,8 @@
     if(r.kind==='NO_SCHEDULE')return `<div style="padding:16px"><div style="font-size:18px;font-weight:700">${escB(resultTitle(r.kind))}</div><div class="muted" style="margin-top:7px">${escB(r.message)}</div><div style="margin-top:10px"><b>Database changes:</b> NONE (dry run)</div></div>`;
 
     const s=r.schedule;
-    const scheduleText=`${time5(s.start_time)} → ${time5(s.end_time)} · Break ${Number(s.break_minutes||0)}m · Grace ${Number(s.grace_minutes||0)}m`;
+    const effective=dateOnly(s.effective_from)||'legacy/current';
+    const scheduleText=`${time5(s.start_time)} → ${time5(s.end_time)} · Break ${Number(s.break_minutes||0)}m · Grace ${Number(s.grace_minutes||0)}m · Effective ${effective}`;
     const att=r.attendance;
     const attendanceText=att?`${att.check_in||'—'} → ${att.check_out||'not checked out'}`:'No attendance record';
     let metrics='';
@@ -165,7 +174,7 @@
     const employees=(state.employees||[]).filter(e=>e.status!=='Inactive');
     const opts=employees.map(e=>`<option value="${escB(e.employee_id)}">${escB(e.employee_id)} — ${escB(e.full_name)}</option>`).join('');
     const today=riyadhNow().date;
-    return `<div class="section" id="fcAttendanceRules7BBox"><div class="section-head"><b>🧮 Attendance Rules Preview — Step 7B</b><span class="badge">Dry run · no DB writes</span></div><div style="padding:16px"><div class="muted" style="margin-bottom:12px">Preview the saved work schedule against attendance. It calculates schedule-based late, early checkout, overtime, break overage, expected work, and absence eligibility without changing any attendance record.</div><div class="actions" style="align-items:end;gap:12px"><div class="field" style="margin:0;min-width:290px"><label>Employee</label><select id="fc_s7b_employee">${opts}</select></div><div class="field" style="margin:0"><label>Date</label><input id="fc_s7b_date" type="date" value="${escB(today)}"></div><button id="fc_s7b_btn" onclick="fcS7BCalculate()">Calculate Rules</button></div></div><div id="fc_s7b_result" style="border-top:1px solid #e4e9ef"><div class="empty">Choose an employee/date and click Calculate Rules.</div></div></div>`;
+    return `<div class="section" id="fcAttendanceRules7BBox"><div class="section-head"><b>🧮 Attendance Rules Preview — Step 7B</b><span class="badge">Dry run · Step 7E history</span></div><div style="padding:16px"><div class="muted" style="margin-bottom:12px">Preview attendance rules using the schedule version effective on the selected date. It calculates late, early checkout, overtime, break overage, expected work, and absence eligibility without changing any attendance record.</div><div class="actions" style="align-items:end;gap:12px"><div class="field" style="margin:0;min-width:290px"><label>Employee</label><select id="fc_s7b_employee">${opts}</select></div><div class="field" style="margin:0"><label>Date</label><input id="fc_s7b_date" type="date" value="${escB(today)}"></div><button id="fc_s7b_btn" onclick="fcS7BCalculate()">Calculate Rules</button></div></div><div id="fc_s7b_result" style="border-top:1px solid #e4e9ef"><div class="empty">Choose an employee/date and click Calculate Rules.</div></div></div>`;
   }
 
   window.fcS7BCalculate=async function(){

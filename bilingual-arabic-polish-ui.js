@@ -17,6 +17,8 @@
     'Checkout Accuracy (m)':'دقة موقع تسجيل الانصراف (م)',
     'Shows permanent ADMIN_CORRECTION events with old → new values, reason, Admin identity and correction time. Report only; no attendance or audit data is changed.':'يعرض أحداث ADMIN_CORRECTION الدائمة مع القيم القديمة ← الجديدة، وسبب التصحيح، وهوية المسؤول، ووقت التصحيح. التقرير للعرض فقط ولا يغيّر بيانات الحضور أو سجل التدقيق.',
     'Monthly inspection-ready attendance statement with schedule history, true absence, late/early/overtime, break overage, night work, leave/holiday/off-day counts, GPS, and correction counts. No attendance data is changed.':'كشف حضور شهري جاهز للمراجعة يشمل سجل جداول العمل، والغياب الفعلي، والتأخير، والانصراف المبكر، والعمل الإضافي، وتجاوز الاستراحة، والعمل الليلي، وعدد أيام الإجازات والعطلات والراحة، وبيانات GPS، وعدد التصحيحات. لا يتم تغيير أي بيانات حضور.',
+    'Effective-date schedule history':'سجل جداول العمل حسب تاريخ السريان',
+    'No effective schedule — recorded rows only':'لا يوجد جدول سارٍ — السجلات المسجلة فقط',
     'ID':'الرقم',
     'SUPPLY':'التوريد',
     'DRIVER':'سائق',
@@ -53,6 +55,7 @@
     if(m)return 'عرض '+arabicMonth(m[1])+'. يتم الاحتفاظ بالسجلات القديمة؛ اختر شهراً آخر لعرض السجل. تظل أدوات تسجيل الحضور والاستراحة والانصراف لليوم فعالة، بينما يتبع جدول السجل أدناه الشهر المحدد.';
     m=raw.match(/^Showing (.+)\. Old records are kept; choose another month to view history\.$/);
     if(m)return 'عرض '+arabicMonth(m[1])+'. يتم الاحتفاظ بالسجلات القديمة؛ اختر شهراً آخر لعرض السجل.';
+    if(/^\d+h \d+m$/.test(raw))return raw.replace(/^(\d+)h (\d+)m$/,'$1س $2د');
     if(raw.startsWith('Attendance Correction + Audit Trail —'))return raw.replace('Attendance Correction + Audit Trail','تصحيح الحضور + سجل التدقيق').replace('Step','الخطوة');
     if(raw.startsWith('Monthly inspection-ready attendance statement'))return exact['Monthly inspection-ready attendance statement with schedule history, true absence, late/early/overtime, break overage, night work, leave/holiday/off-day counts, GPS, and correction counts. No attendance data is changed.'];
     if(raw.startsWith('Shows permanent ADMIN_CORRECTION events'))return exact['Shows permanent ADMIN_CORRECTION events with old → new values, reason, Admin identity and correction time. Report only; no attendance or audit data is changed.'];
@@ -93,10 +96,69 @@
     });
   }
 
+  function monthlyReportPolish(arabic){
+    const result=document.getElementById('fc_r5_result');
+    if(!result)return;
+
+    result.querySelectorAll('.badge').forEach(el=>{
+      const text=(el.textContent||'').trim();
+      if(arabic){
+        if(text==='Effective-date schedule history')el.textContent='سجل جداول العمل حسب تاريخ السريان';
+        else if(text==='No effective schedule — recorded rows only')el.textContent='لا يوجد جدول سارٍ — السجلات المسجلة فقط';
+      }else{
+        if(text==='سجل جداول العمل حسب تاريخ السريان')el.textContent='Effective-date schedule history';
+        else if(text==='لا يوجد جدول سارٍ — السجلات المسجلة فقط')el.textContent='No effective schedule — recorded rows only';
+      }
+    });
+
+    result.querySelectorAll('.stat').forEach(el=>{
+      const text=(el.textContent||'').trim();
+      if(arabic){
+        const m=text.match(/^(\d+)h\s+(\d+)m$/);
+        if(m){el.dataset.fcPolishDurationEn=text;el.textContent=m[1]+'س '+m[2]+'د';}
+      }else if(el.dataset.fcPolishDurationEn){
+        el.textContent=el.dataset.fcPolishDurationEn;
+        delete el.dataset.fcPolishDurationEn;
+      }
+    });
+
+    const notes=[...result.querySelectorAll('.muted')];
+    const note=notes.find(el=>{
+      const t=(el.textContent||'').trim();
+      return t.includes('Schedule version(s) used in this month:')||t.includes('نسخ الجدول المستخدمة هذا الشهر:')||t.includes('schedule version effective on each calendar date');
+    });
+    if(!note)return;
+
+    const current=(note.textContent||'').trim();
+    if(!note.dataset.fcPolishVersions){
+      const versions=current.match(/\d{4}-\d{2}-\d{2}(?:\s*,\s*\d{4}-\d{2}-\d{2})*/);
+      if(versions)note.dataset.fcPolishVersions=versions[0].replace(/\s+/g,'');
+      const counts=current.match(/Excluded so far:\s*(\d+)[\s\S]*?,\s*(\d+)[\s\S]*?,\s*(\d+)[\s\S]*?Days with no[\s\S]*?:\s*(\d+)/i);
+      if(counts){
+        note.dataset.fcPolishOff=counts[1];
+        note.dataset.fcPolishHoliday=counts[2];
+        note.dataset.fcPolishLeave=counts[3];
+        note.dataset.fcPolishNoSchedule=counts[4];
+      }
+    }
+
+    const versions=(note.dataset.fcPolishVersions||'current/fallback').split(',').join(', ');
+    const off=note.dataset.fcPolishOff||'0';
+    const holiday=note.dataset.fcPolishHoliday||'0';
+    const leave=note.dataset.fcPolishLeave||'0';
+    const noSchedule=note.dataset.fcPolishNoSchedule||'0';
+    if(arabic){
+      note.textContent='يستخدم الغياب الفعلي نسخة جدول العمل السارية في كل تاريخ. ويستبعد أيام الراحة والعطلات والإجازات المعتمدة والتواريخ السابقة للالتحاق وأيام العمل المستقبلية أو قيد التنفيذ. نسخ الجدول المستخدمة هذا الشهر: '+versions+'. المستبعد حتى الآن: '+off+' يوم راحة، '+holiday+' عطلة، '+leave+' يوم إجازة معتمدة. الأيام بدون جدول سارٍ: '+noSchedule+'.';
+    }else{
+      note.textContent='True absence uses the schedule version effective on each calendar date. It excludes off days, holidays, approved leave, dates before joining, and future/in-progress workdays. Schedule version(s) used in this month: '+versions+'. Excluded so far: '+off+' off day(s), '+holiday+' holiday(s), '+leave+' approved leave day(s). Days with no effective schedule: '+noSchedule+'.';
+    }
+  }
+
   function apply(){
     const arabic=document.documentElement.dir==='rtl'||document.documentElement.lang==='ar';
     walk(document.getElementById('app'),arabic);
     walk(document.getElementById('login'),arabic);
+    monthlyReportPolish(arabic);
   }
 
   let pending=false;

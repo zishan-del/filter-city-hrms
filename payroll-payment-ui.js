@@ -11,6 +11,7 @@
     try{return JSON.parse(sessionStorage.getItem('fc_user')||'{}');}catch(_){return {};}
   }
   function isAdmin(){return String(currentUser().role||'').toUpperCase()==='ADMIN';}
+  function isArabic(){return document.documentElement.dir==='rtl'||document.documentElement.lang==='ar';}
   function escP(value){
     return String(value==null?'':value).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
@@ -24,6 +25,13 @@
     const m=String(value||'').match(/^(\d{4})-(\d{2})$/);
     if(!m)return value||'';
     return new Intl.DateTimeFormat('en',{timeZone:'Asia/Riyadh',month:'long',year:'numeric'}).format(new Date(Date.UTC(Number(m[1]),Number(m[2])-1,1,12)));
+  }
+  function arabicMonthLabel(value){
+    const names=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const m=String(value||'').match(/^(\d{4})-(\d{2})$/);
+    if(!m)return value||'';
+    const n=Number(m[2]);
+    return (names[n-1]||m[2])+' '+m[1];
   }
   function selectedMonth(){
     return document.getElementById('fcStep6MonthPicker')?.value || sessionStorage.getItem('fc_step6_month_payroll') || riyadhMonth();
@@ -153,11 +161,20 @@
     }catch(e){if(typeof toast==='function')toast(e.message||'Could not load payroll for printing');return;}
     const s=summary(rows);
     const company=(state.settings&&state.settings.company)||'FILTER CITY';
+    const ar=isArabic();
+    const labels=ar?{
+      title:'ملخص الرواتب',employees:'الموظفون',totalNet:'إجمالي الصافي',paid:'مدفوع',unpaid:'غير مدفوع',basic:'الأساسي',allowances:'البدلات',deductions:'الاستقطاعات',id:'الرقم',employee:'الموظف',net:'الصافي',status:'الحالة',paidDate:'تاريخ الدفع',noRecords:'لا توجد سجلات رواتب.',paidStatus:'مدفوع',unpaidStatus:'غير مدفوع',footer:'تم إنشاء هذا التقرير من نظام FILTER CITY HRMS. حالة الدفع المعروضة هي الحالة المحفوظة في السحابة وقت الطباعة.'
+    }:{
+      title:'Payroll Summary',employees:'Employees',totalNet:'Total Net',paid:'Paid',unpaid:'Unpaid',basic:'Basic',allowances:'Allowances',deductions:'Deductions',id:'ID',employee:'Employee',net:'Net',status:'Status',paidDate:'Paid Date',noRecords:'No payroll records.',paidStatus:'PAID',unpaidStatus:'UNPAID',footer:'Generated from FILTER CITY HRMS. Payment status shown is the status saved in the cloud at the time of printing.'
+    };
+    const printMonth=ar?arabicMonthLabel(month):monthLabel(month);
     const w=window.open('','_blank');
-    if(!w){if(typeof toast==='function')toast('Allow pop-ups to print payroll');return;}
-    const tableRows=rows.length?rows.map(r=>`<tr><td>${escP(r.employee_id)}</td><td>${escP(employeeName(r))}</td><td>${money(r.basic_salary)}</td><td>${money(r.allowances)}</td><td>${money(r.deductions)}</td><td>${money(r.net_salary)}</td><td>${r.paid?'PAID':'UNPAID'}</td><td>${escP(paidDate(r.paid_at))}</td></tr>`).join(''):'<tr><td colspan="8">No payroll records.</td></tr>';
+    if(!w){if(typeof toast==='function')toast(ar?'يرجى السماح بالنوافذ المنبثقة لطباعة الرواتب':'Allow pop-ups to print payroll');return;}
+    const tableRows=rows.length?rows.map(r=>`<tr><td>${escP(r.employee_id)}</td><td>${escP(employeeName(r))}</td><td>${money(r.basic_salary)}</td><td>${money(r.allowances)}</td><td>${money(r.deductions)}</td><td>${money(r.net_salary)}</td><td>${r.paid?labels.paidStatus:labels.unpaidStatus}</td><td>${escP(paidDate(r.paid_at))}</td></tr>`).join(''):`<tr><td colspan="8">${labels.noRecords}</td></tr>`;
+    const align=ar?'right':'left';
+    const font=ar?'Tahoma,Arial,sans-serif':'Arial,sans-serif';
     w.document.open();
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escP(company)} Payroll ${escP(month)}</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px}h1{margin:0 0 4px}h2{margin:0 0 20px;font-size:18px;font-weight:normal}table{width:100%;border-collapse:collapse;margin-top:18px;font-size:12px}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}.box{border:1px solid #bbb;padding:10px}.big{font-size:18px;font-weight:bold;margin-top:5px}.foot{margin-top:18px;font-size:12px}@media print{body{padding:0}.no-print{display:none}}</style></head><body><h1>${escP(company)}</h1><h2>Payroll Summary — ${escP(monthLabel(month))}</h2><div class="summary"><div class="box">Employees<div class="big">${rows.length}</div></div><div class="box">Total Net<div class="big">${money(s.net)}</div></div><div class="box">Paid<div class="big">${s.paidCount} · ${money(s.paidAmount)}</div></div><div class="box">Unpaid<div class="big">${s.unpaidCount} · ${money(s.unpaidAmount)}</div></div></div><div>Basic: <b>${money(s.basic)}</b> &nbsp; Allowances: <b>${money(s.allowances)}</b> &nbsp; Deductions: <b>${money(s.deductions)}</b></div><table><thead><tr><th>ID</th><th>Employee</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net</th><th>Status</th><th>Paid Date</th></tr></thead><tbody>${tableRows}</tbody></table><div class="foot">Generated from FILTER CITY HRMS. Payment status shown is the status saved in the cloud at the time of printing.</div></body></html>`);
+    w.document.write(`<!doctype html><html lang="${ar?'ar':'en'}" dir="${ar?'rtl':'ltr'}"><head><meta charset="utf-8"><title>${escP(company)} ${escP(labels.title)} ${escP(month)}</title><style>body{font-family:${font};color:#111;padding:24px;direction:${ar?'rtl':'ltr'};text-align:${align}}h1{margin:0 0 4px}h2{margin:0 0 20px;font-size:18px;font-weight:normal}table{width:100%;border-collapse:collapse;margin-top:18px;font-size:12px;direction:${ar?'rtl':'ltr'}}th,td{border:1px solid #bbb;padding:7px;text-align:${align}}th{background:#eee}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}.box{border:1px solid #bbb;padding:10px}.big{font-size:18px;font-weight:bold;margin-top:5px}.foot{margin-top:18px;font-size:12px}@media print{body{padding:0}.no-print{display:none}}</style></head><body><h1>${escP(company)}</h1><h2>${escP(labels.title)} — ${escP(printMonth)}</h2><div class="summary"><div class="box">${labels.employees}<div class="big">${rows.length}</div></div><div class="box">${labels.totalNet}<div class="big">${money(s.net)}</div></div><div class="box">${labels.paid}<div class="big">${s.paidCount} · ${money(s.paidAmount)}</div></div><div class="box">${labels.unpaid}<div class="big">${s.unpaidCount} · ${money(s.unpaidAmount)}</div></div></div><div>${labels.basic}: <b>${money(s.basic)}</b> &nbsp; ${labels.allowances}: <b>${money(s.allowances)}</b> &nbsp; ${labels.deductions}: <b>${money(s.deductions)}</b></div><table><thead><tr><th>${labels.id}</th><th>${labels.employee}</th><th>${labels.basic}</th><th>${labels.allowances}</th><th>${labels.deductions}</th><th>${labels.net}</th><th>${labels.status}</th><th>${labels.paidDate}</th></tr></thead><tbody>${tableRows}</tbody></table><div class="foot">${labels.footer}</div></body></html>`);
     w.document.close();
     setTimeout(()=>{w.focus();w.print();},300);
   };

@@ -27,6 +27,7 @@
   function polishArabic(html){
     let out=polishEnglish(html);
     out=out.replace(/<html([^>]*)lang="en" dir="ltr"([^>]*)>/i,'<html$1lang="ar" dir="rtl"$2>');
+    out=out.replace('<h1>FILTER CITY TRADING CO.</h1>','<h1 dir="ltr" style="text-align:right;unicode-bidi:isolate">FILTER CITY TRADING CO.</h1>');
     out=out.replace(/<title>(.*?)<\/title>/i,'<title>FILTER CITY TRADING CO. - تقرير فحص الحضور</title>');
     out=out.replace(/<h2>Monthly Attendance Inspection Report — ([^<]+)<\/h2>/i,function(_,month){return '<h2>تقرير فحص الحضور الشهري — '+arabicMonthText(month)+'</h2>';});
     out=out.replace(/<h2 class="fc-brandline">Monthly Attendance Inspection Report — ([^<]+)<\/h2>/i,function(_,month){return '<h2 class="fc-brandline">تقرير فحص الحضور الشهري — '+arabicMonthText(month)+'</h2>';});

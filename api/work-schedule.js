@@ -108,6 +108,23 @@ async function scheduleHistoryRows(){
   `;
 }
 
+async function attendanceAuditRows(){
+  try{
+    return await sql`
+      SELECT a.id,a.attendance_id,a.employee_id,t.work_date,a.action,a.actor_id,a.actor_role,
+             u.username AS actor_username,a.details,a.created_at
+      FROM attendance_audit a
+      LEFT JOIN attendance t ON t.id=a.attendance_id
+      LEFT JOIN users u ON u.id=a.actor_id
+      ORDER BY a.id DESC
+      LIMIT 200
+    `;
+  }catch(error){
+    if(String(error?.code||'')==='42P01')return [];
+    throw error;
+  }
+}
+
 async function syncCurrentSchedule(employeeId,userId){
   const rows=await sql`
     SELECT work_days,start_time,end_time,break_minutes,grace_minutes
@@ -329,7 +346,7 @@ async function handleWorkSchedule(req,res,user){
   if(String(user.role||'').toUpperCase()!=='ADMIN')return send(res,403,{error:'Admin access required'});
   await ensureWorkScheduleSchema();
 
-  if(req.method==='GET')return send(res,200,{schedules:await scheduleRows(),history:await scheduleHistoryRows(),step:'7E'});
+  if(req.method==='GET')return send(res,200,{schedules:await scheduleRows(),history:await scheduleHistoryRows(),attendance_audit:await attendanceAuditRows(),step:'8A-preview'});
 
   if(req.method==='POST'){
     const body=await readJson(req);
@@ -362,7 +379,7 @@ async function handleWorkSchedule(req,res,user){
       updated_by=${Number(user.id)},updated_at=NOW()`;
 
     await syncCurrentSchedule(employeeId,user.id);
-    return send(res,200,{ok:true,schedules:await scheduleRows(),history:await scheduleHistoryRows(),step:'7E'});
+    return send(res,200,{ok:true,schedules:await scheduleRows(),history:await scheduleHistoryRows(),attendance_audit:await attendanceAuditRows(),step:'8A-preview'});
   }
 
   return send(res,405,{error:'Method not allowed'});

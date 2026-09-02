@@ -1,7 +1,7 @@
 const fs=require('fs');
 const path=require('path');
 const attendanceCorrectionApi=require('../attendance-correction-api.js');
-// Step 8B Preview shell: Step 8A preview plus admin correction save/audit handler.
+// Step 9A Preview shell: stable Step 8B plus inspection-ready attendance reporting.
 module.exports=async(req,res)=>{
   if(String(req.url||'').includes('fc_mode=attendance-correction'))return attendanceCorrectionApi(req,res);
   try{
@@ -18,7 +18,8 @@ module.exports=async(req,res)=>{
     const attendanceRulesUi=fs.readFileSync(path.join(process.cwd(),'attendance-rules-preview-ui.js'),'utf8');
     const attendanceCorrectionUi=fs.readFileSync(path.join(process.cwd(),'attendance-correction-preview-ui.js'),'utf8');
     const attendanceCorrectionSaveUi=fs.readFileSync(path.join(process.cwd(),'attendance-correction-save-ui.js'),'utf8');
-    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n<script>\n${payrollPaymentUi}\n</script>\n<script>\n${workScheduleUi}\n</script>\n<script>\n${attendanceRulesUi}\n</script>\n<script>\n${attendanceCorrectionUi}\n</script>\n<script>\n${attendanceCorrectionSaveUi}\n</script>\n</body>`);
+    const attendanceInspectionUi=fs.readFileSync(path.join(process.cwd(),'attendance-inspection-report-ui.js'),'utf8');
+    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n<script>\n${payrollPaymentUi}\n</script>\n<script>\n${workScheduleUi}\n</script>\n<script>\n${attendanceRulesUi}\n</script>\n<script>\n${attendanceCorrectionUi}\n</script>\n<script>\n${attendanceCorrectionSaveUi}\n</script>\n<script>\n${attendanceInspectionUi}\n</script>\n</body>`);
     res.statusCode=200;
     res.setHeader('Content-Type','text/html; charset=utf-8');
     res.setHeader('Cache-Control','no-store, max-age=0');

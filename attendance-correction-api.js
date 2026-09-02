@@ -23,18 +23,30 @@ function readJson(req){
     req.on('error',reject);
   });
 }
-function dateOnly(v){return v?String(v).slice(0,10):'';}
+function dateOnly(v){
+  if(!v)return '';
+  if(v instanceof Date && Number.isFinite(v.getTime()))return v.toISOString().slice(0,10);
+  const s=String(v).trim();
+  const m=s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if(m)return m[1];
+  const d=new Date(v);
+  return Number.isFinite(d.getTime())?d.toISOString().slice(0,10):'';
+}
 function normalizeLocalDateTime(v){
   if(v==null||v==='')return null;
-  const m=String(v).trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-  if(!m)return undefined;
-  return `${m[1]} ${m[2]}:${m[3]}:${m[4]||'00'}`;
+  if(v instanceof Date && Number.isFinite(v.getTime()))return v.toISOString().slice(0,19).replace('T',' ');
+  const s=String(v).trim();
+  const m=s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if(m)return `${m[1]} ${m[2]}:${m[3]}:${m[4]||'00'}`;
+  const d=new Date(v);
+  return Number.isFinite(d.getTime())?d.toISOString().slice(0,19).replace('T',' '):undefined;
 }
-function parseLocal(s){
+function parseLocal(v){
+  const s=normalizeLocalDateTime(v);
   if(!s)return null;
-  const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
   if(!m)return null;
-  return new Date(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4]-3,+m[5],+(m[6]||0)));
+  return new Date(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4]-3,+m[5],+m[6]));
 }
 function minutesBetween(a,b){
   const x=parseLocal(a),y=parseLocal(b);
@@ -58,7 +70,8 @@ function dayName(date){
 }
 function clockMinutes(value){
   if(!value)return null;
-  const m=String(value).match(/[T\s](\d{2}):(\d{2})/)||String(value).match(/^(\d{2}):(\d{2})/);
+  const normalized=normalizeLocalDateTime(value);
+  const m=String(normalized||value).match(/[T\s](\d{2}):(\d{2})/)||String(normalized||value).match(/^(\d{2}):(\d{2})/);
   return m?Number(m[1])*60+Number(m[2]):null;
 }
 function normalizeClock(clock,start,overnight){return clock==null?null:(overnight&&clock<start?clock+1440:clock);}
@@ -123,7 +136,7 @@ async function scheduleRules(employeeId,date,checkIn,checkOut,breakMinutes,worki
   const weekday=dayName(date);
   const workDays=String(s.work_days||'').split(',').filter(Boolean);
   const holiday=(await sql`SELECT id FROM holidays WHERE holiday_date=${date} LIMIT 1`)[0]||null;
-  const leave=(await sql`SELECT id FROM leave_requests WHERE employee_id=${employeeId} AND status='Approved' AND start_date<=${date} AND end_date>=${date} LIMIT 1`)[0]||null;
+  const leave=(await sql`SELECT id FROM leave_requests WHERE employee_id=${employeeId} AND lower(status)='approved' AND start_date<=${date} AND end_date>=${date} LIMIT 1`)[0]||null;
   const classification=holiday?'HOLIDAY':leave?'APPROVED_LEAVE':workDays.includes(weekday)?'SCHEDULED':'OFF_DAY';
   const scheduled=classification==='SCHEDULED';
   const start=clockMinutes(s.start_time);
@@ -162,7 +175,7 @@ module.exports=async function attendanceCorrectionApi(req,res){
     const changes=body.changes&&typeof body.changes==='object'&&!Array.isArray(body.changes)?body.changes:{};
     if(!attendanceId)return send(res,400,{error:'Attendance record is required'});
     if(reason.length<5)return send(res,400,{error:'A clear correction reason is required'});
-    const existing=(await sql`SELECT * FROM attendance WHERE id=${attendanceId} LIMIT 1`)[0];
+    const existing=(await sql`SELECT *,to_char(work_date,'YYYY-MM-DD') AS work_date_key FROM attendance WHERE id=${attendanceId} LIMIT 1`)[0];
     if(!existing)return send(res,404,{error:'Attendance record not found'});
 
     const allowed=new Set(['check_in','check_out','break_start','break_end','latitude','longitude','checkin_accuracy','checkout_latitude','checkout_longitude','checkout_accuracy']);
@@ -171,10 +184,12 @@ module.exports=async function attendanceCorrectionApi(req,res){
     const merged={...existing};
     const datetimeFields=['check_in','check_out','break_start','break_end'];
     for(const key of datetimeFields){
+      const current=normalizeLocalDateTime(existing[key]);
+      if(current!==undefined)merged[key]=current;
       if(!supplied.includes(key))continue;
-      const value=normalizeLocalDateTime(changes[key]);
-      if(value===undefined)return send(res,400,{error:`Invalid ${key.replaceAll('_',' ')} date/time`});
-      merged[key]=value;
+      const next=normalizeLocalDateTime(changes[key]);
+      if(next===undefined)return send(res,400,{error:`Invalid ${key.replaceAll('_',' ')} date/time`});
+      merged[key]=next;
     }
     const numberRules={latitude:[-90,90],longitude:[-180,180],checkin_accuracy:[0,100000],checkout_latitude:[-90,90],checkout_longitude:[-180,180],checkout_accuracy:[0,100000]};
     for(const [key,[min,max]] of Object.entries(numberRules)){
@@ -184,7 +199,7 @@ module.exports=async function attendanceCorrectionApi(req,res){
       merged[key]=value;
     }
     if(!merged.check_in)return send(res,400,{error:'Check In cannot be blank for an attendance record'});
-    const workDate=dateOnly(existing.work_date);
+    const workDate=String(existing.work_date_key||dateOnly(existing.work_date)).slice(0,10);
     if(dateOnly(merged.check_in)!==workDate)return send(res,400,{error:'Check In must stay on the attendance work date'});
     if(Boolean(merged.break_start)!==Boolean(merged.break_end))return send(res,400,{error:'Break Start and Break End must both be entered or both be blank'});
     if(merged.check_out&&minutesBetween(merged.check_in,merged.check_out)<=0)return send(res,400,{error:'Check Out must be after Check In'});
@@ -199,7 +214,7 @@ module.exports=async function attendanceCorrectionApi(req,res){
     const working=merged.check_out?Math.max(0,presence-breakM):0;
     const rules=await scheduleRules(existing.employee_id,workDate,merged.check_in,merged.check_out,breakM,working);
     const night=merged.check_out?nightMinutes(merged.check_in,merged.check_out):0;
-    const normalizedChanged=supplied.filter(k=>String(existing[k]??'')!==String(merged[k]??''));
+    const normalizedChanged=supplied.filter(k=>String(normalizeLocalDateTime(existing[k])??existing[k]??'')!==String(merged[k]??''));
     if(!normalizedChanged.length)return send(res,400,{error:'No actual change detected. Preview a different value first.'});
     const details=`Reason: ${reason}; ${changeSummary(existing,merged,normalizedChanged)}; Recalculated: working ${working}m, late ${rules.late}m, early ${rules.early}m, overtime ${rules.overtime}m, break ${breakM}m, break over ${rules.breakOver}m, expected ${rules.expected}m, night ${night}m; Schedule ${rules.classification}, effective ${rules.effectiveFrom||'legacy'}`;
 

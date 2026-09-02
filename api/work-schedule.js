@@ -5,7 +5,7 @@ function send(res,status,body,attendanceMode=false){
   res.statusCode=status;
   res.setHeader('Content-Type','application/json; charset=utf-8');
   res.setHeader('Cache-Control','no-store, max-age=0');
-  if(attendanceMode)res.setHeader('X-FC-Attendance-Rules','Step7C');
+  if(attendanceMode)res.setHeader('X-FC-Attendance-Rules','Step7E-History');
   res.end(JSON.stringify(body));
 }
 
@@ -27,30 +27,8 @@ function readJson(req){
   });
 }
 
-async function ensureWorkScheduleSchema(){
-  await sql`CREATE TABLE IF NOT EXISTS work_schedules (
-    employee_id TEXT PRIMARY KEY,
-    work_days TEXT NOT NULL,
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
-    break_minutes INTEGER NOT NULL DEFAULT 0,
-    grace_minutes INTEGER NOT NULL DEFAULT 0,
-    updated_by INTEGER,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`;
-}
-
-async function scheduleRows(){
-  return await sql`
-    SELECT e.employee_id,e.full_name,e.status,
-           s.work_days,s.start_time,s.end_time,s.break_minutes,s.grace_minutes,s.updated_at
-    FROM employees e
-    LEFT JOIN work_schedules s ON s.employee_id=e.employee_id
-    ORDER BY e.id
-  `;
-}
-
 function validTime(value){return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value||''));}
+function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||''));}
 
 function riyadhNowParts(){
   const parts=new Intl.DateTimeFormat('en-GB',{
@@ -63,6 +41,91 @@ function riyadhNowParts(){
 }
 function riyadhDate(){const p=riyadhNowParts();return `${p.year}-${p.month}-${p.day}`;}
 function riyadhDateTime(){const p=riyadhNowParts();return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;}
+
+async function ensureWorkScheduleSchema(){
+  await sql`CREATE TABLE IF NOT EXISTS work_schedules (
+    employee_id TEXT PRIMARY KEY,
+    work_days TEXT NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    break_minutes INTEGER NOT NULL DEFAULT 0,
+    grace_minutes INTEGER NOT NULL DEFAULT 0,
+    updated_by INTEGER,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS work_schedule_history (
+    id SERIAL PRIMARY KEY,
+    employee_id TEXT NOT NULL,
+    effective_from DATE NOT NULL,
+    work_days TEXT NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    break_minutes INTEGER NOT NULL DEFAULT 0,
+    grace_minutes INTEGER NOT NULL DEFAULT 0,
+    updated_by INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(employee_id,effective_from)
+  )`;
+
+  await sql`
+    INSERT INTO work_schedule_history(
+      employee_id,effective_from,work_days,start_time,end_time,break_minutes,grace_minutes,updated_by,created_at,updated_at
+    )
+    SELECT s.employee_id,COALESCE(e.joining_date,DATE '1900-01-01'),s.work_days,s.start_time,s.end_time,
+           s.break_minutes,s.grace_minutes,s.updated_by,COALESCE(s.updated_at,NOW()),COALESCE(s.updated_at,NOW())
+    FROM work_schedules s
+    LEFT JOIN employees e ON e.employee_id=s.employee_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM work_schedule_history h WHERE h.employee_id=s.employee_id
+    )
+  `;
+}
+
+async function scheduleRows(date=riyadhDate()){
+  return await sql`
+    SELECT e.employee_id,e.full_name,e.status,
+           h.work_days,h.start_time,h.end_time,h.break_minutes,h.grace_minutes,h.effective_from,h.updated_at
+    FROM employees e
+    LEFT JOIN LATERAL (
+      SELECT work_days,start_time,end_time,break_minutes,grace_minutes,effective_from,updated_at
+      FROM work_schedule_history
+      WHERE employee_id=e.employee_id AND effective_from<=${date}
+      ORDER BY effective_from DESC
+      LIMIT 1
+    ) h ON TRUE
+    ORDER BY e.id
+  `;
+}
+
+async function scheduleHistoryRows(){
+  return await sql`
+    SELECT h.id,h.employee_id,e.full_name,e.status,h.effective_from,h.work_days,h.start_time,h.end_time,
+           h.break_minutes,h.grace_minutes,h.updated_by,h.created_at,h.updated_at
+    FROM work_schedule_history h
+    LEFT JOIN employees e ON e.employee_id=h.employee_id
+    ORDER BY h.employee_id,h.effective_from DESC,h.id DESC
+  `;
+}
+
+async function syncCurrentSchedule(employeeId,userId){
+  const rows=await sql`
+    SELECT work_days,start_time,end_time,break_minutes,grace_minutes
+    FROM work_schedule_history
+    WHERE employee_id=${employeeId} AND effective_from<=${riyadhDate()}
+    ORDER BY effective_from DESC
+    LIMIT 1
+  `;
+  if(!rows.length)return;
+  const s=rows[0];
+  await sql`INSERT INTO work_schedules(employee_id,work_days,start_time,end_time,break_minutes,grace_minutes,updated_by,updated_at)
+    VALUES(${employeeId},${s.work_days},${s.start_time},${s.end_time},${Number(s.break_minutes||0)},${Number(s.grace_minutes||0)},${Number(userId)||null},NOW())
+    ON CONFLICT(employee_id) DO UPDATE SET
+      work_days=EXCLUDED.work_days,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,
+      break_minutes=EXCLUDED.break_minutes,grace_minutes=EXCLUDED.grace_minutes,
+      updated_by=${Number(userId)||null},updated_at=NOW()`;
+}
+
 function parseLocal(s){
   if(!s)return null;
   const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
@@ -126,11 +189,20 @@ async function audit(att,user,action,details=''){
     VALUES(${att.id},${att.employee_id},${action},${Number(user?.id||0)||null},${user?.role||''},${details})`;
 }
 
+async function effectiveSchedule(employeeId,date){
+  const rows=await sql`
+    SELECT employee_id,effective_from,work_days,start_time,end_time,break_minutes,grace_minutes
+    FROM work_schedule_history
+    WHERE employee_id=${employeeId} AND effective_from<=${date}
+    ORDER BY effective_from DESC
+    LIMIT 1
+  `;
+  return rows[0]||null;
+}
+
 async function scheduleRules(employeeId,date,checkIn,checkOut,breakMinutes){
-  const rows=await sql`SELECT employee_id,work_days,start_time,end_time,break_minutes,grace_minutes
-    FROM work_schedules WHERE employee_id=${employeeId} LIMIT 1`;
-  if(!rows.length)return null;
-  const s=rows[0];
+  const s=await effectiveSchedule(employeeId,date);
+  if(!s)return null;
   const weekday=dayName(date);
   const workDays=String(s.work_days||'').split(',').filter(Boolean);
   const holiday=(await sql`SELECT id,name FROM holidays WHERE holiday_date=${date} LIMIT 1`)[0]||null;
@@ -153,6 +225,7 @@ async function scheduleRules(employeeId,date,checkIn,checkOut,breakMinutes){
   return {
     scheduledDay,
     weekday,
+    effectiveFrom:String(s.effective_from||'').slice(0,10),
     classification:holiday?'HOLIDAY':leave?'APPROVED_LEAVE':workDays.includes(weekday)?'SCHEDULED':'OFF_DAY',
     expected,
     late:scheduledDay&&cin!=null?Math.max(0,cin-(start+grace)):0,
@@ -168,7 +241,7 @@ async function legacyRules(working){
   const hours=(await sql`SELECT hours FROM settings WHERE id=1 LIMIT 1`)[0]?.hours||8;
   const scheduled=Math.round(Number(hours)*60);
   return {
-    scheduledDay:true,classification:'LEGACY_SETTINGS',expected:scheduled,late:0,
+    scheduledDay:true,classification:'LEGACY_SETTINGS',effectiveFrom:null,expected:scheduled,late:0,
     early:Math.max(0,scheduled-working),overtime:Math.max(0,working-scheduled),breakOver:0,
     allowedBreak:0,grace:0
   };
@@ -200,8 +273,8 @@ async function handleLiveAttendance(req,res,user){
     ) VALUES(
       ${employeeId},${date},${checkIn},${body.latitude??null},${body.longitude??null},${body.accuracy??null},'Present',${late},${expected}
     ) RETURNING *`)[0];
-    await audit(row,user,'CHECK_IN',`GPS ${body.latitude??''},${body.longitude??''}; Step7C ${rules?rules.classification:'NO_SCHEDULE'}; late ${late}m`);
-    return send(res,201,{attendance:row,rule_mode:rules?'schedule':'legacy'},attendanceMode);
+    await audit(row,user,'CHECK_IN',`GPS ${body.latitude??''},${body.longitude??''}; Step7E ${rules?rules.classification:'NO_SCHEDULE'}; effective ${rules?.effectiveFrom||''}; late ${late}m`);
+    return send(res,201,{attendance:row,rule_mode:rules?'schedule-history':'legacy',schedule_effective_from:rules?.effectiveFrom||null},attendanceMode);
   }
 
   if(!existing)return send(res,400,{error:'Check in first'},attendanceMode);
@@ -225,8 +298,8 @@ async function handleLiveAttendance(req,res,user){
     const expected=rules?rules.expected:Number(existing.expected_work_minutes||0);
     const row=(await sql`UPDATE attendance SET break_end=${end},break_duration_minutes=${breakM},break_over_minutes=${breakOver},expected_work_minutes=${expected}
       WHERE id=${existing.id} RETURNING *`)[0];
-    await audit(row,user,'BREAK_END',`Duration ${breakM} minutes; break over ${breakOver}m`);
-    return send(res,200,{attendance:row,rule_mode:rules?'schedule':'legacy'},attendanceMode);
+    await audit(row,user,'BREAK_END',`Duration ${breakM} minutes; break over ${breakOver}m; schedule effective ${rules?.effectiveFrom||''}`);
+    return send(res,200,{attendance:row,rule_mode:rules?'schedule-history':'legacy',schedule_effective_from:rules?.effectiveFrom||null},attendanceMode);
   }
 
   if(action==='checkout'){
@@ -237,7 +310,7 @@ async function handleLiveAttendance(req,res,user){
     const breakM=Number(existing.break_duration_minutes||0);
     const working=Math.max(0,presence-breakM);
     let rules=await scheduleRules(employeeId,date,existing.check_in,out,breakM);
-    const mode=rules?'schedule':'legacy';
+    const mode=rules?'schedule-history':'legacy';
     if(!rules)rules=await legacyRules(working);
     const night=nightMinutes(existing.check_in,out);
     const row=(await sql`UPDATE attendance SET
@@ -245,8 +318,8 @@ async function handleLiveAttendance(req,res,user){
       working_minutes=${working},overtime_minutes=${rules.overtime},night_minutes=${night},early_checkout_minutes=${rules.early},
       late_minutes=${rules.late},break_over_minutes=${rules.breakOver},expected_work_minutes=${rules.expected},status='Present'
       WHERE id=${existing.id} RETURNING *`)[0];
-    await audit(row,user,'CHECK_OUT',`GPS ${body.latitude??''},${body.longitude??''}; working ${working}m; Step7C ${rules.classification}; late ${rules.late}m; early ${rules.early}m; overtime ${rules.overtime}m; break over ${rules.breakOver}m`);
-    return send(res,200,{attendance:row,rule_mode:mode,rules:{classification:rules.classification,expected_work_minutes:rules.expected,break_over_minutes:rules.breakOver}},attendanceMode);
+    await audit(row,user,'CHECK_OUT',`GPS ${body.latitude??''},${body.longitude??''}; working ${working}m; Step7E ${rules.classification}; effective ${rules.effectiveFrom||''}; late ${rules.late}m; early ${rules.early}m; overtime ${rules.overtime}m; break over ${rules.breakOver}m`);
+    return send(res,200,{attendance:row,rule_mode:mode,schedule_effective_from:rules.effectiveFrom||null,rules:{classification:rules.classification,expected_work_minutes:rules.expected,break_over_minutes:rules.breakOver}},attendanceMode);
   }
 
   return send(res,400,{error:'Unknown attendance action'},attendanceMode);
@@ -256,7 +329,7 @@ async function handleWorkSchedule(req,res,user){
   if(String(user.role||'').toUpperCase()!=='ADMIN')return send(res,403,{error:'Admin access required'});
   await ensureWorkScheduleSchema();
 
-  if(req.method==='GET')return send(res,200,{schedules:await scheduleRows()});
+  if(req.method==='GET')return send(res,200,{schedules:await scheduleRows(),history:await scheduleHistoryRows(),step:'7E'});
 
   if(req.method==='POST'){
     const body=await readJson(req);
@@ -266,10 +339,12 @@ async function handleWorkSchedule(req,res,user){
     const uniqueDays=[...new Set(days.filter(d=>allowed.includes(d)))];
     const start=String(body.start_time||'').slice(0,5);
     const end=String(body.end_time||'').slice(0,5);
+    const effectiveFrom=String(body.effective_from||riyadhDate()).slice(0,10);
     const breakMinutes=Math.round(Number(body.break_minutes||0));
     const graceMinutes=Math.round(Number(body.grace_minutes||0));
 
     if(!employeeId)return send(res,400,{error:'Employee is required'});
+    if(!validDate(effectiveFrom))return send(res,400,{error:'Valid effective-from date is required'});
     if(!uniqueDays.length)return send(res,400,{error:'Select at least one working day'});
     if(!validTime(start)||!validTime(end))return send(res,400,{error:'Valid shift start and end times are required'});
     if(!Number.isFinite(breakMinutes)||breakMinutes<0||breakMinutes>300)return send(res,400,{error:'Break minutes must be between 0 and 300'});
@@ -277,13 +352,17 @@ async function handleWorkSchedule(req,res,user){
     const employee=await sql`SELECT employee_id FROM employees WHERE employee_id=${employeeId} LIMIT 1`;
     if(!employee.length)return send(res,404,{error:'Employee not found'});
 
-    await sql`INSERT INTO work_schedules(employee_id,work_days,start_time,end_time,break_minutes,grace_minutes,updated_by,updated_at)
-      VALUES(${employeeId},${uniqueDays.join(',')},${start},${end},${breakMinutes},${graceMinutes},${Number(user.id)},NOW())
-      ON CONFLICT(employee_id) DO UPDATE SET
-        work_days=EXCLUDED.work_days,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,
-        break_minutes=EXCLUDED.break_minutes,grace_minutes=EXCLUDED.grace_minutes,
-        updated_by=${Number(user.id)},updated_at=NOW()`;
-    return send(res,200,{ok:true,schedules:await scheduleRows()});
+    await sql`INSERT INTO work_schedule_history(
+      employee_id,effective_from,work_days,start_time,end_time,break_minutes,grace_minutes,updated_by,created_at,updated_at
+    ) VALUES(
+      ${employeeId},${effectiveFrom},${uniqueDays.join(',')},${start},${end},${breakMinutes},${graceMinutes},${Number(user.id)},NOW(),NOW()
+    ) ON CONFLICT(employee_id,effective_from) DO UPDATE SET
+      work_days=EXCLUDED.work_days,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,
+      break_minutes=EXCLUDED.break_minutes,grace_minutes=EXCLUDED.grace_minutes,
+      updated_by=${Number(user.id)},updated_at=NOW()`;
+
+    await syncCurrentSchedule(employeeId,user.id);
+    return send(res,200,{ok:true,schedules:await scheduleRows(),history:await scheduleHistoryRows(),step:'7E'});
   }
 
   return send(res,405,{error:'Method not allowed'});
@@ -297,7 +376,7 @@ module.exports=async(req,res)=>{
     if(!user)return send(res,401,{error:'Unauthorized'},attendanceMode);
     return attendanceMode?await handleLiveAttendance(req,res,user):await handleWorkSchedule(req,res,user);
   }catch(error){
-    console.error(attendanceMode?'Step 7C attendance error':'Work schedule error',error);
+    console.error(attendanceMode?'Step 7E attendance error':'Work schedule history error',error);
     return send(res,500,{error:error.message||(attendanceMode?'Attendance error':'Work schedule error')},attendanceMode);
   }
 };

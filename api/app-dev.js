@@ -10,7 +10,8 @@ module.exports=async(req,res)=>{
     const reminderUi=fs.readFileSync(path.join(process.cwd(),'attendance-reminder-test-ui.js'),'utf8');
     const attendanceReportUi=fs.readFileSync(path.join(process.cwd(),'attendance-monthly-report-ui.js'),'utf8');
     const currentMonthUi=fs.readFileSync(path.join(process.cwd(),'current-month-view-ui.js'),'utf8');
-    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n</body>`);
+    const payrollPaymentUi=fs.readFileSync(path.join(process.cwd(),'payroll-payment-ui.js'),'utf8');
+    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n<script>\n${payrollPaymentUi}\n</script>\n</body>`);
     res.statusCode=200;
     res.setHeader('Content-Type','text/html; charset=utf-8');
     res.setHeader('Cache-Control','no-store, max-age=0');

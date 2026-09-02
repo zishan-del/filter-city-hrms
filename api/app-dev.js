@@ -1,5 +1,6 @@
 const fs=require('fs');
 const path=require('path');
+// Step 8A Preview shell: correction preview UI + audit-enabled work-schedule backend.
 module.exports=async(req,res)=>{
   try{
     const html=fs.readFileSync(path.join(process.cwd(),'index.html'),'utf8');

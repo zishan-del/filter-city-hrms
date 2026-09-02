@@ -16,7 +16,8 @@
     "api/push/reminder-logic-test.js": {"maxDuration": 30},
     "api/push/cleanup-subscriptions.js": {"maxDuration": 30},
     "api/payroll-payment.js": {"maxDuration": 30},
-    "api/work-schedule.js": {"maxDuration": 30}
+    "api/work-schedule.js": {"maxDuration": 30},
+    "api/attendance-rules-live.js": {"maxDuration": 30}
   },
   "crons": [{"path":"/api/cron/attendance-reminder","schedule":"15 5 * * *"}],
   "routes": [
@@ -33,6 +34,7 @@
     {"src":"/api/auth/login","dest":"/api/auth/login.js"},
     {"src":"/api/payroll-payment","dest":"/api/payroll-payment.js"},
     {"src":"/api/work-schedule","dest":"/api/work-schedule.js"},
+    {"src":"/api/attendance","dest":"/api/attendance-rules-live.js"},
     {"src":"/api/(.*)","dest":"/api/index?path=$1"},
     {"src":"/$","dest":"/api/app-dev.js"}
   ],

@@ -1,7 +1,7 @@
 const fs=require('fs');
 const path=require('path');
 const attendanceCorrectionApi=require('../attendance-correction-api.js');
-// Step 9C.1 Preview shell: stable Step 9B.1 plus FILTER CITY TRADING CO. branded theme.
+// Step 9C.2 Preview shell: stable Step 9C.1 plus English/Arabic language and RTL framework.
 module.exports=async(req,res)=>{
   if(String(req.url||'').includes('fc_mode=attendance-correction'))return attendanceCorrectionApi(req,res);
   try{
@@ -21,7 +21,8 @@ module.exports=async(req,res)=>{
     const attendanceInspectionUi=fs.readFileSync(path.join(process.cwd(),'attendance-inspection-report-ui.js'),'utf8');
     const attendanceCorrectionReportUi=fs.readFileSync(path.join(process.cwd(),'attendance-correction-report-ui.js'),'utf8');
     const themeUi=fs.readFileSync(path.join(process.cwd(),'theme-branding-ui.js'),'utf8');
-    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n<script>\n${payrollPaymentUi}\n</script>\n<script>\n${workScheduleUi}\n</script>\n<script>\n${attendanceRulesUi}\n</script>\n<script>\n${attendanceCorrectionUi}\n</script>\n<script>\n${attendanceCorrectionSaveUi}\n</script>\n<script>\n${attendanceInspectionUi}\n</script>\n<script>\n${attendanceCorrectionReportUi}\n</script>\n<script>\n${themeUi}\n</script>\n</body>`);
+    const bilingualUi=fs.readFileSync(path.join(process.cwd(),'bilingual-framework-ui.js'),'utf8');
+    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n<script>\n${payrollPaymentUi}\n</script>\n<script>\n${workScheduleUi}\n</script>\n<script>\n${attendanceRulesUi}\n</script>\n<script>\n${attendanceCorrectionUi}\n</script>\n<script>\n${attendanceCorrectionSaveUi}\n</script>\n<script>\n${attendanceInspectionUi}\n</script>\n<script>\n${attendanceCorrectionReportUi}\n</script>\n<script>\n${themeUi}\n</script>\n<script>\n${bilingualUi}\n</script>\n</body>`);
     res.statusCode=200;
     res.setHeader('Content-Type','text/html; charset=utf-8');
     res.setHeader('Cache-Control','no-store, max-age=0');

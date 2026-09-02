@@ -19,6 +19,7 @@
     'Pending Leave':'طلبات الإجازة المعلقة',
     'Cloud connection':'الاتصال السحابي',
     'Connected to PostgreSQL':'متصل بقاعدة البيانات',
+    '● Connected to PostgreSQL':'● متصل بقاعدة البيانات',
     'All information below is loaded from the cloud database.':'جميع المعلومات أدناه محملة من قاعدة البيانات السحابية.',
     'PC and mobile use the same API and database. Browser local storage is used only for the login token, never for HRMS records.':'يستخدم الكمبيوتر والجوال نفس واجهة النظام وقاعدة البيانات. يتم استخدام التخزين المحلي في المتصفح فقط لرمز تسجيل الدخول وليس لسجلات الموارد البشرية.',
     'Default admin: admin@filtercity.com / Admin@12345':'المسؤول الافتراضي: admin@filtercity.com / Admin@12345',
@@ -34,9 +35,9 @@
     .fc-login-lang{justify-content:center;margin:0 auto 16px;width:max-content}
     .fc-top-lang{margin-left:14px}
     html[dir="rtl"] body{font-family:Tahoma,Arial,sans-serif}
-    html[dir="rtl"] .shell{grid-template-columns:1fr 230px}
-    html[dir="rtl"] .sidebar{grid-column:2;grid-row:1;text-align:right}
-    html[dir="rtl"] .main{grid-column:1;grid-row:1}
+    html[dir="rtl"] .shell{grid-template-columns:1fr 230px;direction:ltr}
+    html[dir="rtl"] .sidebar{grid-column:2;grid-row:1;text-align:right;direction:rtl}
+    html[dir="rtl"] .main{grid-column:1;grid-row:1;direction:rtl}
     html[dir="rtl"] .nav button{text-align:right!important;border-left:0!important;border-right:3px solid transparent!important}
     html[dir="rtl"] .nav button.active{border-right-color:#fff!important}
     html[dir="rtl"] .top{direction:rtl}
@@ -52,9 +53,10 @@
     html[dir="rtl"] .hero{border-left:1px solid var(--fc-line)!important;border-right:5px solid var(--fc-red)!important}
     html[dir="rtl"] .fc-top-lang{margin-left:0;margin-right:14px}
     @media(max-width:850px){
-      html[dir="rtl"] .shell{grid-template-columns:1fr}
-      html[dir="rtl"] .sidebar{grid-column:1;right:-250px;left:auto}
+      html[dir="rtl"] .shell{grid-template-columns:1fr;direction:ltr}
+      html[dir="rtl"] .sidebar{grid-column:1;right:-250px;left:auto;direction:rtl}
       html[dir="rtl"] .sidebar.open{right:0;left:auto}
+      html[dir="rtl"] .main{grid-column:1;direction:rtl}
     }
   `;
   document.head.appendChild(style);

@@ -5,6 +5,7 @@
 
   const cache = {};
   let loadingKey = '';
+  let monthTimer = null;
 
   function currentUser(){
     try{return JSON.parse(sessionStorage.getItem('fc_user')||'{}');}catch(_){return {};}
@@ -161,11 +162,17 @@
     setTimeout(()=>{w.focus();w.print();},300);
   };
 
-  document.addEventListener('change',function(e){
-    if(e.target&&e.target.id==='fcStep6MonthPicker'){
-      setTimeout(()=>{const old=document.getElementById('fcPayrollPaymentPanel');if(old)old.remove();ensurePanel();},30);
-    }
-  });
+  function handleMonthInput(e){
+    if(!e.target||e.target.id!=='fcStep6MonthPicker')return;
+    if(monthTimer)clearTimeout(monthTimer);
+    monthTimer=setTimeout(()=>{
+      const old=document.getElementById('fcPayrollPaymentPanel');
+      if(old)old.remove();
+      ensurePanel();
+    },20);
+  }
+  document.addEventListener('input',handleMonthInput);
+  document.addEventListener('change',handleMonthInput);
 
   const content=document.getElementById('content');
   if(content)new MutationObserver(()=>setTimeout(ensurePanel,0)).observe(content,{childList:true,subtree:true});

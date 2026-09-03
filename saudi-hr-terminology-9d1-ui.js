@@ -45,6 +45,20 @@
     return b&&b.id?b.id.replace(/^nav-/,''):'';
   }
   function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+  function syncMonthLanguage(root,ar){
+    root.querySelectorAll('input[type="month"]').forEach(input=>{
+      const select=input.nextElementSibling;
+      if(!select||!select.classList.contains('fc-ar-month-select'))return;
+      if(ar){
+        input.style.display='none';
+        select.style.display='inline-block';
+        if(select.value!==input.value)select.value=input.value;
+      }else{
+        select.style.display='none';
+        input.style.display=input.dataset.fcPolishMonthDisplay||'inline-block';
+      }
+    });
+  }
   function eosbTerminology(root,ar){
     const head=root.querySelector('.section-head b');
     if(head){
@@ -52,7 +66,7 @@
       if(/End of Service Benefit|End-of-Service Award|مكافأة نهاية الخدمة/.test(t))head.textContent=ar?'مكافأة نهاية الخدمة':'End-of-Service Award (EOSB)';
       if(/Calculate EOSB|Calculate End-of-Service Award|حساب مكافأة نهاية الخدمة/.test(t))head.textContent=ar?'حساب مكافأة نهاية الخدمة':'Calculate End-of-Service Award';
     }
-    root.querySelectorAll('th').forEach((th,i)=>{
+    root.querySelectorAll('th').forEach(th=>{
       const t=th.textContent.trim();
       if(t==='Last Salary'||t==='Last salary'||t==='الراتب الأخير'||t==='الأجر الأخير')th.textContent=ar?'الأجر الأخير':'Last Wage';
       if(t==='Benefit'||t==='Award'||t==='المكافأة')th.textContent=ar?'المكافأة':'Award';
@@ -64,7 +78,7 @@
     root.querySelectorAll('button').forEach(btn=>{
       const t=btn.textContent.trim();
       if(t==='+ Calculate EOSB'||t==='+ Calculate End-of-Service Award'||t==='+ حساب مكافأة نهاية الخدمة')btn.textContent=ar?'+ حساب مكافأة نهاية الخدمة':'+ Calculate End-of-Service Award';
-      if(t==='Calculate & Save'||t==='حساب وحفظ')btn.textContent=ar?'حساب وحفظ': 'Calculate & Save';
+      if(t==='Calculate & Save'||t==='حساب وحفظ')btn.textContent=ar?'حساب وحفظ':'Calculate & Save';
     });
   }
 
@@ -73,13 +87,14 @@
     scheduled=false;
     const root=document.getElementById('content');
     if(!root)return;
+    const ar=isArabic();
+    syncMonthLanguage(root,ar);
     const page=activePage();
     let note=document.getElementById('fc-saudi-hr-note-9d1');
     if(!allowed.has(page)){
       if(note)note.remove();
       return;
     }
-    const ar=isArabic();
     const c=copy[page][ar?'ar':'en'];
     if(!note){
       note=document.createElement('div');

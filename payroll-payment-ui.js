@@ -160,7 +160,8 @@
       if(!rows){const d=await request('GET','pay_month='+encodeURIComponent(month));rows=Array.isArray(d.payroll)?d.payroll:[];cache[month]=rows;}
     }catch(e){if(typeof toast==='function')toast(e.message||'Could not load payroll for printing');return;}
     const s=summary(rows);
-    const company=(state.settings&&state.settings.company)||'FILTER CITY';
+    const storedCompany=String((state.settings&&state.settings.company)||'').trim();
+    const company=!storedCompany||/^FILTER CITY$/i.test(storedCompany)?'FILTER CITY TRADING CO.':storedCompany;
     const ar=isArabic();
     const labels=ar?{
       title:'ملخص الرواتب',employees:'الموظفون',totalNet:'إجمالي الصافي',paid:'مدفوع',unpaid:'غير مدفوع',basic:'الأساسي',allowances:'البدلات',deductions:'الاستقطاعات',id:'الرقم',employee:'الموظف',net:'الصافي',status:'الحالة',paidDate:'تاريخ الدفع',noRecords:'لا توجد سجلات رواتب.',paidStatus:'مدفوع',unpaidStatus:'غير مدفوع',footer:'تم إنشاء هذا التقرير من نظام FILTER CITY HRMS. حالة الدفع المعروضة هي الحالة المحفوظة في السحابة وقت الطباعة.'

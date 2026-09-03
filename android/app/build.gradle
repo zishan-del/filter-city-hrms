@@ -1,5 +1,33 @@
 plugins { id 'com.android.application' }
 
-android { namespace 'com.filtercity.hrms'; compileSdk 35
-    defaultConfig { applicationId 'com.filtercity.hrms'; minSdk 23; targetSdk 35; versionCode 1; versionName '1.0.0' }
+android {
+    namespace 'com.filtercity.hrms'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.filtercity.hrms'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    def uploadKeystore = System.getenv('FC_UPLOAD_KEYSTORE')
+    signingConfigs {
+        release {
+            if (uploadKeystore) {
+                storeFile file(uploadKeystore)
+                storePassword System.getenv('FC_UPLOAD_STORE_PASSWORD')
+                keyAlias System.getenv('FC_UPLOAD_KEY_ALIAS')
+                keyPassword System.getenv('FC_UPLOAD_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (uploadKeystore) signingConfig signingConfigs.release
+        }
+    }
 }

@@ -5,6 +5,7 @@ on:
     branches: [store-signing-release-2026-09-03]
     paths:
       - 'android/**'
+      - '.store-signing/backup-public.pem'
       - '.github/workflows/android-store-aab.yml'
   workflow_dispatch:
 
@@ -14,42 +15,99 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
       - name: Install Android API 36
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Validate signing secrets
+
+      - name: Generate first-release upload key
         shell: bash
         run: |
-          test -n "${{ secrets.FC_UPLOAD_KEYSTORE_B64 }}" || (echo "Missing FC_UPLOAD_KEYSTORE_B64" && exit 1)
-          test -n "${{ secrets.FC_UPLOAD_STORE_PASSWORD }}" || (echo "Missing FC_UPLOAD_STORE_PASSWORD" && exit 1)
-          test -n "${{ secrets.FC_UPLOAD_KEY_ALIAS }}" || (echo "Missing FC_UPLOAD_KEY_ALIAS" && exit 1)
-          test -n "${{ secrets.FC_UPLOAD_KEY_PASSWORD }}" || (echo "Missing FC_UPLOAD_KEY_PASSWORD" && exit 1)
-      - name: Restore upload keystore
-        shell: bash
-        run: echo "${{ secrets.FC_UPLOAD_KEYSTORE_B64 }}" | base64 --decode > "$GITHUB_WORKSPACE/android/upload-key.jks"
+          set -euo pipefail
+          STORE_PASSWORD="$(openssl rand -hex 32)"
+          KEY_PASSWORD="$(openssl rand -hex 32)"
+          KEY_ALIAS="filtercity_upload"
+          KEYSTORE="$GITHUB_WORKSPACE/android/upload-key.jks"
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storetype JKS \
+            -storepass "$STORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            -keyalg RSA \
+            -keysize 4096 \
+            -validity 10000 \
+            -dname "CN=FILTER CITY HRMS, OU=Human Resources, O=FILTER CITY TRADING CO., L=Riyadh, ST=Riyadh, C=SA"
+          echo "FC_UPLOAD_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "FC_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "FC_UPLOAD_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "FC_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+
       - name: Build signed release AAB
         working-directory: android
-        env:
-          FC_UPLOAD_KEYSTORE: ${{ github.workspace }}/android/upload-key.jks
-          FC_UPLOAD_STORE_PASSWORD: ${{ secrets.FC_UPLOAD_STORE_PASSWORD }}
-          FC_UPLOAD_KEY_ALIAS: ${{ secrets.FC_UPLOAD_KEY_ALIAS }}
-          FC_UPLOAD_KEY_PASSWORD: ${{ secrets.FC_UPLOAD_KEY_PASSWORD }}
         run: gradle --no-daemon bundleRelease
-      - name: Verify AAB exists
-        run: test -s android/app/build/outputs/bundle/release/app-release.aab
-      - name: Upload AAB
+
+      - name: Verify signed AAB
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          test -s "$AAB"
+          jarsigner -verify -certs "$AAB" >/dev/null
+          keytool -list -v -keystore "$FC_UPLOAD_KEYSTORE" -storepass "$FC_UPLOAD_STORE_PASSWORD" -alias "$FC_UPLOAD_KEY_ALIAS" | grep -E 'SHA256:|Valid from:' > android/upload-key-fingerprint.txt
+
+      - name: Create encrypted upload-key backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'FILTER CITY HRMS - Google Play Upload Key' \
+            'KEEP THIS FILE AND upload-key.jks SECURE. They are required for future Play Store updates.' \
+            "Package: com.filtercity.hrms" \
+            "Alias: $FC_UPLOAD_KEY_ALIAS" \
+            "Store password: $FC_UPLOAD_STORE_PASSWORD" \
+            "Key password: $FC_UPLOAD_KEY_PASSWORD" \
+            > android/upload-key-credentials.txt
+          tar -C android -czf android/upload-key-backup.tar.gz upload-key.jks upload-key-credentials.txt upload-key-fingerprint.txt
+          RECOVERY_PASS="$(openssl rand -base64 48 | tr -d '\n')"
+          printf '%s' "$RECOVERY_PASS" > android/recovery-pass.txt
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in android/upload-key-backup.tar.gz \
+            -out android/upload-key-backup.enc \
+            -pass file:android/recovery-pass.txt
+          openssl pkeyutl -encrypt -pubin \
+            -inkey .store-signing/backup-public.pem \
+            -in android/recovery-pass.txt \
+            -out android/recovery-pass.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256
+          rm -f android/recovery-pass.txt android/upload-key-backup.tar.gz android/upload-key-credentials.txt android/upload-key.jks
+
+      - name: Upload signed AAB
         uses: actions/upload-artifact@v4
         with:
           name: filter-city-hrms-play-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
+
+      - name: Upload encrypted upload-key backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: filter-city-hrms-upload-key-encrypted
+          path: |
+            android/upload-key-backup.enc
+            android/recovery-pass.enc
+          retention-days: 1

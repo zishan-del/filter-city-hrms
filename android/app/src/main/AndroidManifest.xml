@@ -3,7 +3,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <application android:theme="@style/AppTheme" android:label="FILTER CITY HRMS" android:usesCleartextTraffic="false" android:allowBackup="false" android:supportsRtl="true">
+    <application
+        android:theme="@style/AppTheme"
+        android:label="FILTER CITY HRMS"
+        android:icon="@drawable/ic_filter_city"
+        android:roundIcon="@drawable/ic_filter_city"
+        android:usesCleartextTraffic="false"
+        android:allowBackup="false"
+        android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

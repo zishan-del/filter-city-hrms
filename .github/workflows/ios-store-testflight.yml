@@ -1,0 +1,140 @@
+name: Validate iOS Store and Upload TestFlight
+
+on:
+  push:
+    branches: [store-signing-release-2026-09-03]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-store-testflight.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-ios-store:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Show Xcode version
+        run: xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate App Store icon
+        working-directory: ios
+        run: python3 scripts/generate_app_icon.py
+      - name: Validate icon
+        working-directory: ios
+        run: |
+          file FILTERCITYHRMS/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+          sips -g pixelWidth -g pixelHeight -g hasAlpha FILTERCITYHRMS/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Build Release for iOS Simulator without signing
+        working-directory: ios
+        run: xcodebuild -project FILTERCITYHRMS.xcodeproj -scheme FILTERCITYHRMS -configuration Release -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
+      - name: Create unsigned device archive for packaging validation
+        working-directory: ios
+        run: xcodebuild -project FILTERCITYHRMS.xcodeproj -scheme FILTERCITYHRMS -configuration Release -sdk iphoneos -archivePath "$RUNNER_TEMP/FILTERCITYHRMS-unsigned.xcarchive" CODE_SIGNING_ALLOWED=NO archive
+
+  testflight-upload:
+    needs: validate-ios-store
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate Apple signing credentials
+        shell: bash
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_DISTRIBUTION_CERT_P12_B64: ${{ secrets.IOS_DISTRIBUTION_CERT_P12_B64 }}
+          IOS_DISTRIBUTION_CERT_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERT_PASSWORD }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_PRIVATE_KEY_P8_B64: ${{ secrets.APPSTORE_PRIVATE_KEY_P8_B64 }}
+        run: |
+          test -n "$IOS_TEAM_ID" || (echo "Missing IOS_TEAM_ID" && exit 1)
+          test -n "$IOS_DISTRIBUTION_CERT_P12_B64" || (echo "Missing IOS_DISTRIBUTION_CERT_P12_B64" && exit 1)
+          test -n "$IOS_DISTRIBUTION_CERT_PASSWORD" || (echo "Missing IOS_DISTRIBUTION_CERT_PASSWORD" && exit 1)
+          test -n "$APPSTORE_KEY_ID" || (echo "Missing APPSTORE_KEY_ID" && exit 1)
+          test -n "$APPSTORE_ISSUER_ID" || (echo "Missing APPSTORE_ISSUER_ID" && exit 1)
+          test -n "$APPSTORE_PRIVATE_KEY_P8_B64" || (echo "Missing APPSTORE_PRIVATE_KEY_P8_B64" && exit 1)
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate App Store icon and project
+        working-directory: ios
+        run: |
+          python3 scripts/generate_app_icon.py
+          xcodegen generate
+      - name: Import Apple Distribution certificate
+        shell: bash
+        env:
+          P12_B64: ${{ secrets.IOS_DISTRIBUTION_CERT_P12_B64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/filtercity-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "$P12_B64" | base64 --decode > "$RUNNER_TEMP/distribution.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/distribution.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+      - name: Restore App Store Connect API key
+        shell: bash
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          P8_B64: ${{ secrets.APPSTORE_PRIVATE_KEY_P8_B64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/appstore"
+          echo "$P8_B64" | base64 --decode > "$RUNNER_TEMP/appstore/AuthKey_${KEY_ID}.p8"
+      - name: Archive signed App Store build
+        working-directory: ios
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          xcodebuild \
+            -project FILTERCITYHRMS.xcodeproj \
+            -scheme FILTERCITYHRMS \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$RUNNER_TEMP/FILTERCITYHRMS.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/appstore/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            archive
+      - name: Create App Store export options
+        shell: bash
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+      - name: Upload archive to TestFlight
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/FILTERCITYHRMS.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/appstore/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"

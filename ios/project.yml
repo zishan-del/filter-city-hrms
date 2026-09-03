@@ -20,6 +20,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.filtercity.hrms
         PRODUCT_NAME: FILTERCITYHRMS
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
     info:
       path: FILTERCITYHRMS/Info.plist

@@ -1,0 +1,42 @@
+name: FILTERCITYHRMS
+options:
+  bundleIdPrefix: com.filtercity
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    MARKETING_VERSION: 1.0.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 6.0
+targets:
+  FILTERCITYHRMS:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - FILTERCITYHRMS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.filtercity.hrms
+        PRODUCT_NAME: FILTERCITYHRMS
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: FILTERCITYHRMS/Info.plist
+      properties:
+        CFBundleDisplayName: FILTER CITY HRMS
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: FILTER CITY HRMS uses your location when required to verify attendance check-in and check-out.
+        NSPhotoLibraryUsageDescription: FILTER CITY HRMS lets you choose task evidence photos when a task requires an attachment.
+        NSCameraUsageDescription: FILTER CITY HRMS can use the camera when you choose to capture task evidence.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight

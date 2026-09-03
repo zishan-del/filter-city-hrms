@@ -61,6 +61,29 @@
     const headers=tracker.querySelectorAll('thead th');
     const labels=[ar?'الموظف':'Employee',ar?'الاسم':'Name',c.next,c.planned,c.cycle,c.last,c.until];
     headers.forEach((th,i)=>{if(labels[i])th.textContent=labels[i];});
+
+    tracker.querySelectorAll('tbody tr').forEach(tr=>{
+      const cells=tr.querySelectorAll('td');
+      if(cells.length<7)return;
+
+      const cycleCell=cells[4];
+      const cycleText=cycleCell.textContent.trim();
+      const cycleMatch=cycleText.match(/^([0-9]+(?:\.[0-9]+)?)\s*(?:years?|سنة)$/i);
+      if(cycleMatch){
+        const localizedCycle=ar?`${cycleMatch[1]} سنة`:`${cycleMatch[1]} years`;
+        if(cycleText!==localizedCycle)cycleCell.textContent=localizedCycle;
+      }
+
+      const untilBadge=cells[6].querySelector('.badge')||cells[6];
+      const untilText=untilBadge.textContent.trim();
+      let localizedUntil='';
+      if(/^(?:Overdue|متأخر)$/i.test(untilText))localizedUntil=ar?'متأخر':'Overdue';
+      else{
+        const dayMatch=untilText.match(/^([0-9]+)\s*(?:days?|يوماً|يومًا|يوم)$/i);
+        if(dayMatch)localizedUntil=ar?`${dayMatch[1]} يوماً`:`${dayMatch[1]} days`;
+      }
+      if(localizedUntil&&untilText!==localizedUntil)untilBadge.textContent=localizedUntil;
+    });
   }
 
   let scheduled=false;

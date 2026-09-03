@@ -1,7 +1,7 @@
 const fs=require('fs');
 const path=require('path');
 const attendanceCorrectionApi=require('../attendance-correction-api.js');
-// Step 9C.6 Preview shell: stable Step 9C.5 plus bilingual attendance correction/audit print-PDF consistency.
+// Step 9D.1 Preview shell: tested Step 9C.6 plus Saudi HR terminology/compliance wording guidance only.
 module.exports=async(req,res)=>{
   if(String(req.url||'').includes('fc_mode=attendance-correction'))return attendanceCorrectionApi(req,res);
   try{
@@ -30,7 +30,8 @@ module.exports=async(req,res)=>{
     const dashboardRedesignPolishUi=fs.readFileSync(path.join(process.cwd(),'dashboard-redesign-polish-ui.js'),'utf8');
     const attendanceInspectionPrint9C5Ui=fs.readFileSync(path.join(process.cwd(),'attendance-inspection-print-9c5-ui.js'),'utf8');
     const attendanceAuditPrint9C6Ui=fs.readFileSync(path.join(process.cwd(),'attendance-audit-print-9c6-ui.js'),'utf8');
-    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n<script>\n${payrollPaymentUi}\n</script>\n<script>\n${workScheduleUi}\n</script>\n<script>\n${attendanceRulesUi}\n</script>\n<script>\n${attendanceCorrectionUi}\n</script>\n<script>\n${attendanceCorrectionSaveUi}\n</script>\n<script>\n${attendanceInspectionUi}\n</script>\n<script>\n${attendanceCorrectionReportUi}\n</script>\n<script>\n${themeUi}\n</script>\n<script>\n${bilingualUi}\n</script>\n<script>\n${bilingualPolishUi}\n</script>\n<script>\n${payrollArabicPolishUi}\n</script>\n<script>\n${mobileResponsiveUi}\n</script>\n<script>\n${dashboardRedesignUi}\n</script>\n<script>\n${dashboardRedesignFixUi}\n</script>\n<script>\n${dashboardRedesignPolishUi}\n</script>\n<script>\n${attendanceInspectionPrint9C5Ui}\n</script>\n<script>\n${attendanceAuditPrint9C6Ui}\n</script>\n</body>`);
+    const saudiHrTerminology9D1Ui=fs.readFileSync(path.join(process.cwd(),'saudi-hr-terminology-9d1-ui.js'),'utf8');
+    const injected=html.replace('</body>',`<script>\n${taskUi}\n</script>\n<script>\n${leaveUi}\n</script>\n<script>\n${payrollUi}\n</script>\n<script>\n${attendanceFix}\n</script>\n<script>\n${reminderUi}\n</script>\n<script>\n${attendanceReportUi}\n</script>\n<script>\n${currentMonthUi}\n</script>\n<script>\n${payrollPaymentUi}\n</script>\n<script>\n${workScheduleUi}\n</script>\n<script>\n${attendanceRulesUi}\n</script>\n<script>\n${attendanceCorrectionUi}\n</script>\n<script>\n${attendanceCorrectionSaveUi}\n</script>\n<script>\n${attendanceInspectionUi}\n</script>\n<script>\n${attendanceCorrectionReportUi}\n</script>\n<script>\n${themeUi}\n</script>\n<script>\n${bilingualUi}\n</script>\n<script>\n${bilingualPolishUi}\n</script>\n<script>\n${payrollArabicPolishUi}\n</script>\n<script>\n${mobileResponsiveUi}\n</script>\n<script>\n${dashboardRedesignUi}\n</script>\n<script>\n${dashboardRedesignFixUi}\n</script>\n<script>\n${dashboardRedesignPolishUi}\n</script>\n<script>\n${attendanceInspectionPrint9C5Ui}\n</script>\n<script>\n${attendanceAuditPrint9C6Ui}\n</script>\n<script>\n${saudiHrTerminology9D1Ui}\n</script>\n</body>`);
     res.statusCode=200;
     res.setHeader('Content-Type','text/html; charset=utf-8');
     res.setHeader('Cache-Control','no-store, max-age=0');

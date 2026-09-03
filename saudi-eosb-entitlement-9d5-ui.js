@@ -26,6 +26,8 @@
       rule:'Rule Applied',
       empty:'No stored EOSB records are available for preview.',
       waiting:'Choose a stored record and separation reason, then calculate.',
+      missingRecord:'Select a Base EOSB Record before calculating.',
+      missingReason:'Select the verified Separation Reason / Rule before calculating.',
       standardRule:'Full Article 84 base award (100%).',
       resignation0:'Article 85 resignation: service below 2 years → no EOSB award.',
       resignationThird:'Article 85 resignation: 2 to 5 years inclusive → one-third of base award.',
@@ -57,6 +59,8 @@
       rule:'القاعدة المطبقة',
       empty:'لا توجد سجلات مكافأة نهاية خدمة محفوظة للمعاينة.',
       waiting:'اختر السجل وسبب انتهاء العلاقة ثم اضغط حساب الاستحقاق.',
+      missingRecord:'اختر سجل المكافأة الأساسية قبل حساب الاستحقاق.',
+      missingReason:'اختر سبب انتهاء العلاقة / القاعدة بعد التحقق قبل حساب الاستحقاق.',
       standardRule:'المكافأة الأساسية حسب المادة 84 كاملة (100%).',
       resignation0:'المادة 85 — الاستقالة: خدمة أقل من سنتين ← لا تستحق مكافأة نهاية خدمة.',
       resignationThird:'المادة 85 — الاستقالة: من سنتين إلى خمس سنوات شاملة ← ثلث المكافأة الأساسية.',
@@ -77,6 +81,7 @@
     #fc-eosb-entitlement-9d5 .fc-9d5-grid{display:grid;grid-template-columns:1.3fr 1.7fr;gap:12px;padding:12px 16px}
     #fc-eosb-entitlement-9d5 label{display:block;font-size:12px;font-weight:800;margin-bottom:6px;color:#17324d}
     #fc-eosb-entitlement-9d5 select{width:100%;padding:10px 11px;border:1px solid #c9d2dd;border-radius:8px;background:#fff;color:#122033}
+    #fc-eosb-entitlement-9d5 select.fc-9d5-invalid{border:2px solid #ed1c24;background:#fff7f7;box-shadow:0 0 0 3px rgba(237,28,36,.08)}
     #fc-eosb-entitlement-9d5 .fc-9d5-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 16px 12px}
     #fc-eosb-entitlement-9d5 .fc-9d5-meta div,#fc-eosb-entitlement-9d5 .fc-9d5-card{border:1px solid #dce3eb;border-radius:9px;padding:10px 12px;background:#f8fafc}
     #fc-eosb-entitlement-9d5 .fc-9d5-meta small,#fc-eosb-entitlement-9d5 .fc-9d5-card small{display:block;color:#637083;font-size:11px;margin-bottom:4px}
@@ -85,6 +90,7 @@
     #fc-eosb-entitlement-9d5 .fc-9d5-action button{background:#ed1c24;font-weight:800}
     #fc-eosb-entitlement-9d5 .fc-9d5-result{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 16px 12px}
     #fc-eosb-entitlement-9d5 .fc-9d5-rule{margin:0 16px 12px;padding:11px 12px;border:1px solid #dce3eb;border-radius:9px;background:#fff;color:#34465b;font-size:12px;line-height:1.55}
+    #fc-eosb-entitlement-9d5 .fc-9d5-rule.fc-9d5-warning{border-color:#ed1c24;background:#fff7f7;color:#9b1c14;font-weight:700}
     #fc-eosb-entitlement-9d5 .fc-9d5-note{margin:0 16px 15px;color:#637083;font-size:11px;line-height:1.55}
     @media(max-width:760px){#fc-eosb-entitlement-9d5 .fc-9d5-grid,#fc-eosb-entitlement-9d5 .fc-9d5-meta,#fc-eosb-entitlement-9d5 .fc-9d5-result{grid-template-columns:1fr}#fc-eosb-entitlement-9d5 .fc-9d5-head{align-items:flex-start;flex-direction:column}#fc-eosb-entitlement-9d5 .fc-9d5-badge{white-space:normal}}
   `;
@@ -139,23 +145,52 @@
     if(rows.length){
       const rec=panel.querySelector('#fc-eosb-9d5-record');
       const reason=panel.querySelector('#fc-eosb-9d5-reason');
+      const ruleBox=panel.querySelector('.fc-9d5-rule');
+      const ruleText=panel.querySelector('#fc-eosb-9d5-rule');
+      const clearValidation=()=>{
+        rec.classList.remove('fc-9d5-invalid');
+        reason.classList.remove('fc-9d5-invalid');
+        ruleBox?.classList.remove('fc-9d5-warning');
+      };
+      const selectedRecord=()=>rec.value===''?null:rows[Number(rec.value)];
       const sync=()=>{
-        const r=rows[Number(rec.value)];
+        clearValidation();
+        const r=selectedRecord();
         panel.querySelector('#fc-eosb-9d5-employee').textContent=r?String(r.employee_id||'—'):'—';
         panel.querySelector('#fc-eosb-9d5-service').textContent=r?`${n(r.service_years).toFixed(2)} ${lang==='ar'?'سنة':'years'}`:'—';
         panel.querySelector('#fc-eosb-9d5-wage').textContent=r?money(r.last_salary):'—';
         ['base','rate','result'].forEach(id=>{const el=panel.querySelector('#fc-eosb-9d5-'+id);if(el)el.textContent='—';});
-        const rule=panel.querySelector('#fc-eosb-9d5-rule');if(rule)rule.textContent=c.waiting;
+        if(ruleText)ruleText.textContent=c.waiting;
       };
       rec.addEventListener('change',sync);
+      reason.addEventListener('change',()=>{
+        reason.classList.remove('fc-9d5-invalid');
+        ruleBox?.classList.remove('fc-9d5-warning');
+        ['base','rate','result'].forEach(id=>{const el=panel.querySelector('#fc-eosb-9d5-'+id);if(el)el.textContent='—';});
+        if(ruleText)ruleText.textContent=c.waiting;
+      });
       panel.querySelector('#fc-eosb-9d5-calc').addEventListener('click',()=>{
-        const r=rows[Number(rec.value)];
-        if(!r||!reason.value){const rule=panel.querySelector('#fc-eosb-9d5-rule');if(rule)rule.textContent=c.waiting;return;}
+        clearValidation();
+        const r=selectedRecord();
+        if(!r){
+          rec.classList.add('fc-9d5-invalid');
+          ruleBox?.classList.add('fc-9d5-warning');
+          if(ruleText)ruleText.textContent=c.missingRecord;
+          rec.focus();
+          return;
+        }
+        if(!reason.value){
+          reason.classList.add('fc-9d5-invalid');
+          ruleBox?.classList.add('fc-9d5-warning');
+          if(ruleText)ruleText.textContent=c.missingReason;
+          reason.focus();
+          return;
+        }
         const out=entitlement(r.service_years,r.last_salary,reason.value,c);
         panel.querySelector('#fc-eosb-9d5-base').textContent=money(out.base);
         panel.querySelector('#fc-eosb-9d5-rate').textContent=`${(out.rate*100).toFixed(out.rate===1||out.rate===0?0:2)}%`;
         panel.querySelector('#fc-eosb-9d5-result').textContent=money(out.amount);
-        panel.querySelector('#fc-eosb-9d5-rule').textContent=out.rule;
+        if(ruleText)ruleText.textContent=out.rule;
       });
     }
     return panel;

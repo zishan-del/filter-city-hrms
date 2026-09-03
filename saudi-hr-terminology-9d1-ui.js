@@ -59,6 +59,46 @@
       }
     });
   }
+  function arabicMonthLabel(value){
+    const m=String(value||'').match(/^(\d{4})-(\d{2})$/);
+    if(!m)return value||'';
+    const names=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    return `${names[Number(m[2])-1]||m[2]} ${m[1]}`;
+  }
+  function englishMonthLabel(value){
+    const m=String(value||'').match(/^(\d{4})-(\d{2})$/);
+    if(!m)return value||'';
+    return new Intl.DateTimeFormat('en',{timeZone:'Asia/Riyadh',month:'long',year:'numeric'}).format(new Date(Date.UTC(Number(m[1]),Number(m[2])-1,1,12)));
+  }
+  function attendanceTerminology(root,ar){
+    const monthText=root.querySelector('#fcStep6MonthText');
+    const monthInput=root.querySelector('#fcStep6MonthPicker');
+    if(monthText&&monthInput){
+      if(ar){
+        const label=arabicMonthLabel(monthInput.value);
+        monthText.textContent=`عرض ${label}. السجلات القديمة محفوظة؛ اختر شهراً آخر لعرض السجل. تبقى عناصر تسجيل الحضور/الاستراحة/الانصراف لليوم مباشرة؛ ويتبع جدول السجل أدناه الشهر المحدد.`;
+      }else{
+        const label=englishMonthLabel(monthInput.value);
+        monthText.textContent=`Showing ${label}. Old records are kept; choose another month to view history. Today’s check-in/break/check-out controls stay live; the history table below follows the selected month.`;
+      }
+    }
+
+    const box=root.querySelector('#fcAttendanceCorrection8A');
+    if(!box)return;
+    const head=box.querySelector('.section-head');
+    if(head){
+      const title=head.querySelector('b');
+      const badge=head.querySelector('.badge');
+      if(title)title.textContent=ar?'🛠 تصحيح الحضور + سجل التدقيق — الخطوة 8B':'🛠 Attendance Correction + Audit Trail — Step 8B';
+      if(badge)badge.textContent=ar?'المعاينة أولاً · حفظ المسؤول':'Preview first · Admin save';
+    }
+    const intro=box.querySelector(':scope > div:nth-child(2) > .muted');
+    if(intro){
+      intro.innerHTML=ar
+        ?'اختر سجل حضور، وأدخل القيم المصححة وسبب التصحيح، ثم اضغط <b>معاينة</b>. يظهر زر الحفظ الفعلي فقط بعد معاينة صحيحة. عند الحفظ تتم إعادة حساب بيانات الحضور وإنشاء سجل تدقيق دائم <b>ADMIN_CORRECTION</b>.'
+        :'Select an attendance record, enter corrected values and a reason, then <b>Preview</b>. The real Save button appears only after a valid preview. Saving recalculates attendance and creates a permanent <b>ADMIN_CORRECTION</b> audit entry.';
+    }
+  }
   function eosbTerminology(root,ar){
     const head=root.querySelector('.section-head b');
     if(head){
@@ -105,6 +145,7 @@
     }
     const html=`<div class="fc-9d1-head"><span>${esc(c.title)}</span><span class="fc-9d1-badge">${ar?'الخطوة 9D.1 · إرشاد تشغيلي':'Step 9D.1 · operational guidance'}</span></div><div class="fc-9d1-body">${esc(c.body)}</div>`;
     if(note.innerHTML!==html)note.innerHTML=html;
+    if(page==='attendance')attendanceTerminology(root,ar);
     if(page==='eosb')eosbTerminology(root,ar);
   }
   function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(apply);}

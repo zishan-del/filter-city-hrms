@@ -1,6 +1,11 @@
 name: Build signed Play Store AAB
 
 on:
+  push:
+    branches: [store-signing-release-2026-09-03]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-store-aab.yml'
   workflow_dispatch:
 
 jobs:
@@ -40,6 +45,8 @@ jobs:
           FC_UPLOAD_KEY_ALIAS: ${{ secrets.FC_UPLOAD_KEY_ALIAS }}
           FC_UPLOAD_KEY_PASSWORD: ${{ secrets.FC_UPLOAD_KEY_PASSWORD }}
         run: gradle --no-daemon bundleRelease
+      - name: Verify AAB exists
+        run: test -s android/app/build/outputs/bundle/release/app-release.aab
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:

@@ -2,7 +2,7 @@ name: Build FILTER CITY HRMS APK
 
 on:
   push:
-    branches: [app-build]
+    branches: [app-build, release-final-2026-09-03]
   workflow_dispatch:
 
 jobs:

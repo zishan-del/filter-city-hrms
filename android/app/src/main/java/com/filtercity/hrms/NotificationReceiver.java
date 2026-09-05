@@ -31,7 +31,7 @@ import java.util.TimeZone;
 
 public class NotificationReceiver extends BroadcastReceiver {
     private static final int REQUEST_POLL = 9201;
-    private static final long POLL_INTERVAL_MS = 15L * 60L * 1000L;
+    private static final long POLL_INTERVAL_MS = 5L * 60L * 1000L;
 
     @Override
     public void onReceive(Context context, Intent intent) {

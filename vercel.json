@@ -20,6 +20,7 @@
   },
   "crons": [{"path":"/api/cron/attendance-reminder","schedule":"15 5 * * *"}],
   "routes": [
+    {"src":"/.well-known/assetlinks.json","dest":"/public/.well-known/assetlinks.json"},
     {"src":"/sw.js","dest":"/public/sw.js"},
     {"src":"/service-worker.js","dest":"/public/service-worker.js"},
     {"src":"/manifest.webmanifest","dest":"/public/manifest.webmanifest"},
@@ -37,5 +38,8 @@
     {"src":"/api/(.*)","dest":"/api/index?path=$1"},
     {"src":"/$","dest":"/api/app-dev.js"}
   ],
-  "headers": [{"source":"/api/(.*)","headers":[{"key":"Cache-Control","value":"no-store, max-age=0"}]}]
+  "headers": [
+    {"source":"/.well-known/assetlinks.json","headers":[{"key":"Content-Type","value":"application/json; charset=utf-8"},{"key":"Cache-Control","value":"no-store, max-age=0"}]},
+    {"source":"/api/(.*)","headers":[{"key":"Cache-Control","value":"no-store, max-age=0"}]}
+  ]
 }

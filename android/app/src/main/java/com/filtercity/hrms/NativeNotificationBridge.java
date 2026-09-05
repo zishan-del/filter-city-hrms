@@ -7,7 +7,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
-import android.webkit.JavascriptInterface;
 
 public class NativeNotificationBridge {
     static final String PREFS = "fc_native_notifications";
@@ -18,6 +17,7 @@ public class NativeNotificationBridge {
     static final String KEY_FULL_NAME = "full_name";
     static final String KEY_LAST_TASK_ID = "last_task_id";
     static final String KEY_LAST_ATTENDANCE_DATE = "last_attendance_date";
+    static final String KEY_PERMISSION_REQUESTED = "permission_requested";
     static final String CHANNEL_ID = "hrms_reminders";
     static final int NOTIFICATION_PERMISSION_REQUEST = 1003;
 
@@ -43,8 +43,7 @@ public class NativeNotificationBridge {
         manager.createNotificationChannel(channel);
     }
 
-    @JavascriptInterface
-    public void syncSession(String origin, String token, String employeeId, String fullName, int baselineTaskId) {
+    void syncSession(String origin, String token, String employeeId, String fullName, int baselineTaskId) {
         String cleanOrigin = origin == null ? "" : origin.trim();
         String cleanToken = token == null ? "" : token.trim();
         String cleanEmployee = employeeId == null ? "" : employeeId.trim();
@@ -60,6 +59,7 @@ public class NativeNotificationBridge {
 
         if (employeeChanged) {
             editor.putBoolean(KEY_ENABLED, false)
+                    .putBoolean(KEY_PERMISSION_REQUESTED, false)
                     .putInt(KEY_LAST_TASK_ID, Math.max(0, baselineTaskId))
                     .remove(KEY_LAST_ATTENDANCE_DATE)
                     .apply();
@@ -73,22 +73,15 @@ public class NativeNotificationBridge {
         editor.apply();
     }
 
-    @JavascriptInterface
-    public String getStatus() {
-        if (prefs.getString(KEY_EMPLOYEE_ID, "").isEmpty() || prefs.getString(KEY_TOKEN, "").isEmpty()) {
-            return "not_ready";
-        }
-        if (!notificationsAllowed()) return "needs_permission";
-        return prefs.getBoolean(KEY_ENABLED, false) ? "enabled" : "disabled";
-    }
-
-    @JavascriptInterface
-    public void enable() {
+    void ensureEnabled() {
         if (prefs.getString(KEY_EMPLOYEE_ID, "").isEmpty() || prefs.getString(KEY_TOKEN, "").isEmpty()) return;
         activity.runOnUiThread(() -> {
             createChannel(activity);
             if (Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                activity.requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+                if (!prefs.getBoolean(KEY_PERMISSION_REQUESTED, false)) {
+                    prefs.edit().putBoolean(KEY_PERMISSION_REQUESTED, true).apply();
+                    activity.requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+                }
                 return;
             }
             completeEnable();
@@ -97,19 +90,12 @@ public class NativeNotificationBridge {
 
     void onNotificationPermissionResult(boolean granted) {
         if (granted) completeEnable();
+        else prefs.edit().putBoolean(KEY_ENABLED, false).apply();
     }
 
     void completeEnable() {
         prefs.edit().putBoolean(KEY_ENABLED, true).apply();
         NotificationReceiver.schedule(activity);
         NotificationReceiver.pollNow(activity);
-    }
-
-    private boolean notificationsAllowed() {
-        if (Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            return false;
-        }
-        NotificationManager manager = (NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
-        return manager == null || manager.areNotificationsEnabled();
     }
 }

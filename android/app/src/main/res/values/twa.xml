@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fc_navy">#0B3158</color>
+    <string name="launch_url">https://filter-city-hrms-git-fix-native-notifications-c42395-filtercity.vercel.app/</string>
+    <string name="asset_statements">[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"web","site":"https://filter-city-hrms-git-fix-native-notifications-c42395-filtercity.vercel.app"}}]</string>
+</resources>

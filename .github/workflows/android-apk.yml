@@ -45,17 +45,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-            adb logcat -c
-            adb shell am start -W -n com.filtercity.hrms/com.google.androidbrowserhelper.trusted.LauncherActivity
-            sleep 6
-            adb logcat -d > launch-log.txt
-            if grep -q "Process: com.filtercity.hrms" launch-log.txt && grep -q "FATAL EXCEPTION" launch-log.txt; then
-              echo "FILTER CITY HRMS crashed during launch"
-              grep -A 30 -B 5 "Process: com.filtercity.hrms" launch-log.txt || true
-              exit 1
-            fi
-            echo "APK startup smoke test passed"
+            bash -lc 'set -e; adb install -r android/app/build/outputs/apk/debug/app-debug.apk; adb logcat -c; adb shell am start -W -n com.filtercity.hrms/com.google.androidbrowserhelper.trusted.LauncherActivity | tee launch-result.txt; grep -q "Status: ok" launch-result.txt; sleep 6; adb logcat -d > launch-log.txt; if grep -Fq "FATAL EXCEPTION" launch-log.txt && grep -Fq "Process: com.filtercity.hrms" launch-log.txt; then echo "FILTER CITY HRMS crashed during launch"; grep -A 30 -B 5 "Process: com.filtercity.hrms" launch-log.txt || true; exit 1; fi; echo "APK startup smoke test passed"'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

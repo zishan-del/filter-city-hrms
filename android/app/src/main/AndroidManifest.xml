@@ -9,7 +9,8 @@
         android:icon="@drawable/ic_filter_city"
         android:roundIcon="@drawable/ic_filter_city"
         android:allowBackup="false"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:manageSpaceActivity="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity">
 
         <meta-data
             android:name="asset_statements"
@@ -49,6 +50,16 @@
                     android:scheme="https"
                     android:host="filter-city-hrms-git-fix-native-notifications-c42395-filtercity.vercel.app" />
             </intent-filter>
+        </activity>
+
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity"
+            android:theme="@style/Theme.LauncherActivity"
+            android:enabled="true"
+            android:exported="false">
+            <meta-data
+                android:name="android.support.customtabs.trusted.MANAGE_SPACE_URL"
+                android:value="@string/launch_url" />
         </activity>
 
         <activity

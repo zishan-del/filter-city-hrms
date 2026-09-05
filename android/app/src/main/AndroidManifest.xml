@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:theme="@style/AppTheme"
+        android:theme="@style/Theme.LauncherActivity"
         android:label="FILTER CITY HRMS"
         android:icon="@drawable/ic_filter_city"
         android:roundIcon="@drawable/ic_filter_city"
@@ -17,8 +17,10 @@
 
         <activity
             android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:theme="@style/Theme.LauncherActivity"
             android:label="FILTER CITY HRMS"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTask">
 
             <meta-data
                 android:name="android.support.customtabs.trusted.DEFAULT_URL"
@@ -29,9 +31,13 @@
             <meta-data
                 android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
                 android:resource="@color/fc_navy" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.FALLBACK_STRATEGY"
+                android:value="webview" />
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
@@ -44,6 +50,12 @@
                     android:host="filter-city-hrms-git-fix-native-notifications-c42395-filtercity.vercel.app" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.WebViewFallbackActivity"
+            android:theme="@style/AppTheme"
+            android:configChanges="orientation|screenSize"
+            android:exported="false" />
 
         <service
             android:name="com.google.androidbrowserhelper.trusted.DelegationService"

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.filtercity.hrms",
+      "sha256_cert_fingerprints": [
+        "BC:AE:1E:FE:D5:F2:F7:FC:B1:5D:98:D7:FA:FA:99:58:E4:0C:D9:A9:AA:28:B4:CE:CE:5E:2F:7E:38:85:9D:4C"
+      ]
+    }
+  }
+]

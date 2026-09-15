@@ -2,6 +2,11 @@ name: Build signed Play Store AAB
 
 on:
   workflow_dispatch:
+  push:
+    branches: [play-store-release-2026-09-06]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-store-aab.yml'
 
 jobs:
   build-aab:

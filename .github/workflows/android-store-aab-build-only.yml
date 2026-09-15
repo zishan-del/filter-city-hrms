@@ -1,0 +1,43 @@
+name: Build Play AAB (build only)
+
+on:
+  push:
+    branches: [play-store-release-2026-09-06]
+    paths:
+      - '.github/workflows/android-store-aab-build-only.yml'
+      - 'android/**'
+  workflow_dispatch:
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build release AAB
+        working-directory: android
+        run: gradle --no-daemon bundleRelease
+      - name: Verify AAB exists
+        shell: bash
+        run: test -s android/app/build/outputs/bundle/release/app-release.aab
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: filter-city-hrms-play-aab-build-only
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 7

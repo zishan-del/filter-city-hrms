@@ -5,7 +5,6 @@ const sql = neon(process.env.DATABASE_URL);
 const ADMIN_LOGIN='admin@filtercity.com';
 const LEGACY_ADMIN_LOGIN='admin@company.com';
 const REVIEW_ADMIN_LOGIN='google.review@filtercity.com';
-const REVIEW_PASSWORD_HASH='9b90d4c9b7ce5bc0daf1d1564ae5209b62680fcb7ac57badd4cec603d04e160f';
 
 function hash(value){
   return crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -39,16 +38,8 @@ function makeToken(user){
   })).toString('base64url');
 }
 
-async function ensureReviewAccount(){
-  await sql`INSERT INTO users(username,password_hash,role,active) VALUES(${REVIEW_ADMIN_LOGIN},${REVIEW_PASSWORD_HASH},'ADMIN',TRUE) ON CONFLICT(username) DO NOTHING`;
-  const rows=await sql`SELECT id,username,role,active,password_hash FROM users WHERE lower(username)=lower(${REVIEW_ADMIN_LOGIN}) LIMIT 1`;
-  return !!(rows.length&&rows[0].active&&rows[0].role==='ADMIN'&&rows[0].password_hash===REVIEW_PASSWORD_HASH);
-}
-
 module.exports=async(req,res)=>{
   try{
-    const reviewReady=await ensureReviewAccount();
-    if(req.method==='GET'&&String(req.url||'').includes('fc_review_setup=1')) return send(res,200,{ok:true,review_ready:reviewReady,username:REVIEW_ADMIN_LOGIN,role:'ADMIN'});
     if(req.method!=='POST') return send(res,405,{error:'Method not allowed'});
     const body=await readBody(req);
     const username=String(body.username||'').trim();

@@ -39,6 +39,12 @@ function makeToken(user){
 
 module.exports=async(req,res)=>{
   try{
+    if(req.method==='GET'&&String(req.url||'').includes('fc_db_fingerprint=1')){
+      const raw=String(process.env.DATABASE_URL||'');
+      if(!raw) return send(res,503,{ok:false,error:'DATABASE_URL not configured'});
+      const parsed=new URL(raw);
+      return send(res,200,{ok:true,db_host:parsed.hostname,db_name:parsed.pathname.replace(/^\//,'')||null});
+    }
     if(req.method!=='POST') return send(res,405,{error:'Method not allowed'});
     const body=await readBody(req);
     const username=String(body.username||'').trim();

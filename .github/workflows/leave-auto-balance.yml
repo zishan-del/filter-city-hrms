@@ -24,6 +24,7 @@ jobs:
           node --check api/index.js
           node --check api/app-dev.js
           node --check bilingual-framework-ui.js
+          node --check dashboard-redesign-fix-ui.js
       - name: Leave logic tests
         run: node leave-automation-logic.test.js
       - name: Verify UI is wired into both app shells

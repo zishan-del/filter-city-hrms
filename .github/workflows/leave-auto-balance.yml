@@ -1,0 +1,32 @@
+name: Leave automation checks
+
+on:
+  push:
+    branches:
+      - feature/leave-auto-balance-2026-09-28
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax checks
+        run: |
+          node --check leave-automation-logic.js
+          node --check leave-automation-ui.js
+          node --check api/hrms.js
+          node --check api/index.js
+          node --check api/app-dev.js
+          node --check bilingual-framework-ui.js
+      - name: Leave logic tests
+        run: node leave-automation-logic.test.js
+      - name: Verify UI is wired into both app shells
+        run: |
+          grep -q "leave-automation-ui.js" api/app-dev.js
+          grep -q "leave-automation-ui.js" api/index.js

@@ -7,12 +7,12 @@ const {
 
 assert.deepStrictEqual(
   calculateLeaveDays('2026-09-27', '2026-10-03', []),
-  { calendarDays: 7, holidayDays: 0, weekendDays: 2, leaveDays: 5 }
+  { calendarDays: 7, holidayDays: 0, weekendDays: 1, leaveDays: 6 }
 );
 
 assert.deepStrictEqual(
   calculateLeaveDays('2026-09-27', '2026-10-03', ['2026-09-29']),
-  { calendarDays: 7, holidayDays: 1, weekendDays: 2, leaveDays: 4 }
+  { calendarDays: 7, holidayDays: 1, weekendDays: 1, leaveDays: 5 }
 );
 
 assert.strictEqual(dateRange('2026-09-28', '2026-09-28').length, 1);

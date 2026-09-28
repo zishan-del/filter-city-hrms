@@ -17,7 +17,7 @@
       calendarDays++;
       const d=new Date(t),key=d.toISOString().slice(0,10),dow=d.getUTCDay();
       if(holidaySet.has(key))holidayDays++;
-      else if(dow===5||dow===6)weekendDays++;
+      else if(dow===5)weekendDays++;
       else leaveDays++;
     }
     return {calendarDays,holidayDays,weekendDays,leaveDays,valid:true};
@@ -76,7 +76,7 @@
     }).join('');
 
     return employeeSummary+tracker+`<div class="section"><div class="section-head"><b>Leave Requests</b><button onclick="leaveForm()">+ Leave Request</button></div>
-      <div style="padding:12px 18px;color:#637083;font-size:13px">Leave days are calculated automatically. Friday, Saturday and saved holidays are excluded from the leave-day deduction.</div>
+      <div style="padding:12px 18px;color:#637083;font-size:13px">Leave days are calculated automatically. Friday and saved holidays are excluded from the leave-day deduction.</div>
       <div class="table-wrap"><table class="table"><thead><tr><th>Employee</th><th>Type</th><th>Start</th><th>End</th><th>Days</th><th>Status</th><th data-leave-reason="1">Reason</th><th>Actions</th></tr></thead>
       <tbody>${requestRows||'<tr><td colspan="8" class="empty">No leave requests.</td></tr>'}</tbody></table></div></div>`;
   };
@@ -94,7 +94,7 @@
         <div class="field"><label>End date</label><input id="leave_end" type="date"></div>
         <div class="field"><label>Auto-calculated leave days</label><input id="leave_days" type="number" value="0" readonly></div>
         <div class="field"><label>Available leave balance</label><input id="leave_available" type="number" value="0" readonly></div>
-        <div class="field full"><div id="leave_breakdown" class="muted">Choose start and end dates. Friday, Saturday and saved holidays will be excluded automatically.</div></div>
+        <div class="field full"><div id="leave_breakdown" class="muted">Choose start and end dates. Friday and saved holidays will be excluded automatically.</div></div>
         <div class="field full"><label>Reason</label><textarea id="leave_reason"></textarea></div>
         <div class="full"><button onclick="saveLeave()">Submit to Cloud</button></div>
       </div></div>`;
@@ -121,7 +121,7 @@
     if(breakdown){
       breakdown.textContent=c.valid
         ?`Calendar: ${c.calendarDays} | Weekend: ${c.weekendDays} | Holidays: ${c.holidayDays} | Leave days: ${c.leaveDays} | Balance after approval: ${Math.max(0,stats.remaining-c.leaveDays)}`
-        :'Choose valid start and end dates. Friday, Saturday and saved holidays will be excluded automatically.';
+        :'Choose valid start and end dates. Friday and saved holidays will be excluded automatically.';
     }
   };
 

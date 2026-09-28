@@ -21,7 +21,7 @@ function dateRange(startValue, endValue) {
   return out;
 }
 
-function calculateLeaveDays(startValue, endValue, holidayDates = [], weekendDays = [5, 6]) {
+function calculateLeaveDays(startValue, endValue, holidayDates = [], weekendDays = [5]) {
   const dates = dateRange(startValue, endValue);
   const holidaySet = new Set((holidayDates || []).map(dateKey).filter(Boolean));
   const weekendSet = new Set(weekendDays.map(Number));

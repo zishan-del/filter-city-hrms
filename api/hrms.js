@@ -1,5 +1,6 @@
 const { neon } = require('@neondatabase/serverless');
 const crypto = require('crypto');
+const leaveLogic = require('../leave-automation-logic.js');
 const sql = neon(process.env.DATABASE_URL);
 function hash(value){return crypto.createHash('sha256').update(String(value)).digest('hex');}
 function send(res,status,body){res.statusCode=status;res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store, max-age=0');res.end(JSON.stringify(body));}
@@ -26,7 +27,7 @@ async function ensureSchema(){
  await sql`INSERT INTO users(username,password_hash,role,active) SELECT 'admin@filtercity.com',${hash('Admin@12345')},'ADMIN',TRUE WHERE NOT EXISTS (SELECT 1 FROM users WHERE role='ADMIN') ON CONFLICT(username) DO NOTHING`;
 }
 async function login(req,res){const body=await getBody(req);const username=String(body.username||'').trim();const password=String(body.password||'');const role=String(body.role||'ADMIN').toUpperCase();const rows=await sql`SELECT id,username,password_hash,role,employee_id,active FROM users WHERE lower(username)=lower(${username}) AND role=${role} LIMIT 1`;if(!rows.length||!rows[0].active||rows[0].password_hash!==hash(password))return send(res,401,{error:'Invalid username or password'});const user=rows[0];return send(res,200,{token:makeToken(user),user:{id:user.id,username:user.username,role:user.role,employeeId:user.employee_id||null}})}
-async function data(req,res){const user=auth(req);if(!user)return send(res,401,{error:'Unauthorized'});const [users,employees,attendance,tasks,leaves,holidays,payroll,eosb,settings]=await Promise.all([sql`SELECT id,username,role,employee_id,active FROM users ORDER BY id`,sql`SELECT * FROM employees ORDER BY id`,sql`SELECT * FROM attendance ORDER BY work_date DESC,id DESC`,sql`SELECT * FROM tasks ORDER BY id DESC`,sql`SELECT * FROM leave_requests ORDER BY id DESC`,sql`SELECT * FROM holidays ORDER BY holiday_date`,sql`SELECT * FROM payroll ORDER BY id DESC`,sql`SELECT * FROM eosb_records ORDER BY id DESC`,sql`SELECT * FROM settings WHERE id=1`]);return send(res,200,{users,employees,attendance,tasks,leaves,holidays,payroll,eosb,settings:settings[0]})}
+async function data(req,res){const user=auth(req);if(!user)return send(res,401,{error:'Unauthorized'});const [users,employees,attendance,tasks,leaves,holidays,payroll,eosb,settings]=await Promise.all([sql`SELECT id,username,role,employee_id,active FROM users ORDER BY id`,sql`SELECT * FROM employees ORDER BY id`,sql`SELECT * FROM attendance ORDER BY work_date DESC,id DESC`,sql`SELECT * FROM tasks ORDER BY id DESC`,sql`SELECT * FROM leave_requests ORDER BY id DESC`,sql`SELECT * FROM holidays ORDER BY holiday_date`,sql`SELECT * FROM payroll ORDER BY id DESC`,sql`SELECT * FROM eosb_records ORDER BY id DESC`,sql`SELECT * FROM settings WHERE id=1`]);const employeesWithLeave=employees.map(e=>{const b=leaveLogic.leaveBalance(e,leaves);return {...e,leave_entitlement_days:b.entitlement,leave_approved_days:b.approved,leave_pending_days:b.pending,leave_balance_days:b.remaining}});return send(res,200,{users,employees:employeesWithLeave,attendance,tasks,leaves,holidays,payroll,eosb,settings:settings[0]})}
 function adminOnly(user,res){if(!user||user.role!=='ADMIN'){send(res,403,{error:'Admin access required'});return false}return true}
 function validateEmployeeBody(body,requireEmployeeId){
  const clean={...body};
@@ -39,7 +40,7 @@ function validateEmployeeBody(body,requireEmployeeId){
  const leaveCycle=body.leave_cycle_years===''||body.leave_cycle_years==null?2:Number(body.leave_cycle_years);
  if(!Number.isFinite(leaveCycle)||leaveCycle<=0)return {error:'Leave cycle must be a positive number of years.'};
  const planned=body.planned_leave_days===''||body.planned_leave_days==null?30:Number(body.planned_leave_days);
- if(!Number.isInteger(planned)||planned<30||planned>60)return {error:'Planned leave days must be a whole number from 30 to 60.'};
+ if(!Number.isInteger(planned)||planned<30||planned>60)return {error:'Total leave entitlement must be a whole number from 30 to 60 days.'};
  const status=String(body.status||'Active');
  if(status!=='Active'&&status!=='Inactive')return {error:'Employee status must be Active or Inactive.'};
  clean.salary=salary;clean.leave_cycle_years=leaveCycle;clean.planned_leave_days=planned;clean.status=status;
@@ -47,6 +48,18 @@ function validateEmployeeBody(body,requireEmployeeId){
 }
 async function createEmployee(body){const e=await sql`INSERT INTO employees(employee_id,full_name,mobile,national_id,nationality,joining_date,department,job_title,salary,bank_details,status,leave_cycle_years,last_leave_end_date,next_leave_date,planned_leave_days) VALUES(${body.employee_id},${body.full_name},${body.mobile||''},${body.national_id||''},${body.nationality||'Saudi'},${body.joining_date||null},${body.department||''},${body.job_title||''},${body.salary},${body.bank_details||''},${body.status},${body.leave_cycle_years},${body.last_leave_end_date||null},${body.next_leave_date||null},${body.planned_leave_days}) RETURNING *`;if(body.username&&body.password)await sql`INSERT INTO users(username,password_hash,role,employee_id,active) VALUES(${body.username},${hash(body.password)},'EMPLOYEE',${body.employee_id},${body.status!=='Inactive'}) ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash,employee_id=EXCLUDED.employee_id,active=EXCLUDED.active`;return e[0]}
 async function updateEmployee(id,body){const e=await sql`UPDATE employees SET full_name=${body.full_name},mobile=${body.mobile||''},national_id=${body.national_id||''},nationality=${body.nationality||'Saudi'},joining_date=${body.joining_date||null},department=${body.department||''},job_title=${body.job_title||''},salary=${body.salary},bank_details=${body.bank_details||''},status=${body.status},leave_cycle_years=${body.leave_cycle_years},last_leave_end_date=${body.last_leave_end_date||null},next_leave_date=${body.next_leave_date||null},planned_leave_days=${body.planned_leave_days} WHERE id=${id} RETURNING *`;if(!e.length)return null;if(body.username)await sql`UPDATE users SET username=${body.username},active=${body.status!=='Inactive'} WHERE employee_id=${e[0].employee_id}`;if(body.password)await sql`UPDATE users SET password_hash=${hash(body.password)} WHERE employee_id=${e[0].employee_id}`;return e[0]}
+async function leaveCalculation(startDate,endDate){
+ const start=leaveLogic.dateKey(startDate),end=leaveLogic.dateKey(endDate);
+ if(!start||!end)throw new Error('Start date and end date are required.');
+ const holidayRows=await sql`SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN ${start} AND ${end} ORDER BY holiday_date`;
+ return leaveLogic.calculateLeaveDays(start,end,holidayRows.map(h=>String(h.holiday_date).slice(0,10)));
+}
+async function employeeLeaveContext(employeeId){
+ const employees=await sql`SELECT * FROM employees WHERE employee_id=${employeeId} LIMIT 1`;
+ if(!employees.length)return null;
+ const leaves=await sql`SELECT * FROM leave_requests WHERE employee_id=${employeeId} ORDER BY id`;
+ return {employee:employees[0],leaves};
+}
 async function changeAdminPassword(req,res,user){if(!adminOnly(user,res))return;const body=await getBody(req);const currentPassword=String(body.current_password||'');const newPassword=String(body.new_password||'');if(newPassword.length<8)return send(res,400,{error:'New password must be at least 8 characters'});const rows=await sql`SELECT password_hash FROM users WHERE id=${Number(user.id)} AND role='ADMIN' LIMIT 1`;if(!rows.length||rows[0].password_hash!==hash(currentPassword))return send(res,400,{error:'Current password is incorrect'});await sql`UPDATE users SET password_hash=${hash(newPassword)} WHERE id=${Number(user.id)} AND role='ADMIN'`;return send(res,200,{ok:true})}
 async function handle(req,res){res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');if(req.method==='OPTIONS')return send(res,204,{});await ensureSchema();const path=getPath(req);if(req.method==='GET'&&path==='health')return send(res,200,{ok:true,cloud:true,company:'FILTER CITY'});if(req.method==='POST'&&path==='auth/login')return login(req,res);const user=auth(req);if(!user)return send(res,401,{error:'Unauthorized'});if(req.method==='GET'&&path==='data')return data(req,res);if(req.method==='POST'&&path==='auth/change-password')return changeAdminPassword(req,res,user);const body=['POST','PUT'].includes(req.method)?await getBody(req):{};const parts=path.split('/').filter(Boolean);const resource=parts[0];const id=parts[1]?Number(parts[1]):null;
  if(resource==='employees'){if(!adminOnly(user,res))return;if(req.method==='POST'){const checked=validateEmployeeBody(body,true);if(checked.error)return send(res,400,{error:checked.error});return send(res,201,{employee:await createEmployee(checked.body)})}if(req.method==='PUT'&&id){const checked=validateEmployeeBody(body,false);if(checked.error)return send(res,400,{error:checked.error});const employee=await updateEmployee(id,checked.body);if(!employee)return send(res,404,{error:'Employee not found'});return send(res,200,{employee})}if(req.method==='DELETE'&&id){await sql`DELETE FROM users WHERE employee_id=(SELECT employee_id FROM employees WHERE id=${id})`;await sql`DELETE FROM employees WHERE id=${id}`;return send(res,200,{ok:true})}}
@@ -56,7 +69,47 @@ async function handle(req,res){res.setHeader('Access-Control-Allow-Origin','*');
    if(req.method==='PUT'&&id){const existing=await sql`SELECT * FROM tasks WHERE id=${id} LIMIT 1`;if(!existing.length)return send(res,404,{error:'Task not found'});if(user.role==='ADMIN'){const row=await sql`UPDATE tasks SET employee_id=COALESCE(${body.employee_id},employee_id),title=COALESCE(${body.title},title),description=COALESCE(${body.description},description),task_date=COALESCE(${body.task_date},task_date),start_time=COALESCE(${body.start_time},start_time),deadline_time=COALESCE(${body.deadline_time},deadline_time),priority=COALESCE(${body.priority},priority),status=COALESCE(${body.status},status),updated_at=NOW() WHERE id=${id} RETURNING *`;return send(res,200,{task:row[0]})}if(existing[0].employee_id!==user.employee_id)return send(res,403,{error:'This task is not assigned to you'});const photo=body.photo_data===undefined?existing[0].photo_data:(body.photo_data||null);if(photo&&String(photo).length>700000)return send(res,400,{error:'Photo is too large. Please use a smaller photo.'});const row=await sql`UPDATE tasks SET status=COALESCE(${body.status},status),photo_data=${photo},updated_at=NOW() WHERE id=${id} RETURNING *`;return send(res,200,{task:row[0]})}
    if(req.method==='DELETE'&&id){if(!adminOnly(user,res))return;await sql`DELETE FROM tasks WHERE id=${id}`;return send(res,200,{ok:true})}
  }
- if(resource==='leaves'){if(req.method==='POST'){const employeeId=user.role==='EMPLOYEE'?user.employee_id:body.employee_id;const row=await sql`INSERT INTO leave_requests(employee_id,leave_type,start_date,end_date,days,reason,status) VALUES(${employeeId},${body.leave_type||'Annual Leave'},${body.start_date},${body.end_date},${Number(body.days||1)},${body.reason||''},'Pending') RETURNING *`;return send(res,201,{leave:row[0]})}if(req.method==='PUT'&&id){if(!adminOnly(user,res))return;const row=await sql`UPDATE leave_requests SET status=${body.status} WHERE id=${id} RETURNING *`;return send(res,200,{leave:row[0]})}}
+ if(resource==='leaves'){
+   if(req.method==='POST'){
+     const employeeId=String(user.role==='EMPLOYEE'?user.employee_id:body.employee_id||'').trim();
+     if(!employeeId)return send(res,400,{error:'Employee ID required'});
+     const ctx=await employeeLeaveContext(employeeId);
+     if(!ctx)return send(res,404,{error:'Employee not found'});
+     let calculation;
+     try{calculation=await leaveCalculation(body.start_date,body.end_date)}catch(e){return send(res,400,{error:e.message})}
+     if(calculation.leaveDays<=0)return send(res,400,{error:'Selected dates contain no chargeable leave days after weekends and holidays.'});
+     const overlap=await sql`SELECT id,status,start_date,end_date FROM leave_requests WHERE employee_id=${employeeId} AND status IN ('Pending','Approved') AND start_date<=${body.end_date} AND end_date>=${body.start_date} LIMIT 1`;
+     if(overlap.length)return send(res,400,{error:'This leave overlaps an existing pending or approved leave request.'});
+     const balance=leaveLogic.leaveBalance(ctx.employee,ctx.leaves);
+     if(calculation.leaveDays>balance.remaining)return send(res,400,{error:`Requested leave is ${calculation.leaveDays} days but only ${balance.remaining} days remain.`});
+     const row=(await sql`INSERT INTO leave_requests(employee_id,leave_type,start_date,end_date,days,reason,status) VALUES(${employeeId},${body.leave_type||'Annual Leave'},${body.start_date},${body.end_date},${calculation.leaveDays},${body.reason||''},'Pending') RETURNING *`)[0];
+     const updated=leaveLogic.leaveBalance(ctx.employee,[...ctx.leaves,row]);
+     return send(res,201,{leave:row,calculation,balance:updated});
+   }
+   if(req.method==='PUT'&&id){
+     if(!adminOnly(user,res))return;
+     const existing=(await sql`SELECT * FROM leave_requests WHERE id=${id} LIMIT 1`)[0];
+     if(!existing)return send(res,404,{error:'Leave request not found'});
+     const requested=String(body.status||'').trim().toLowerCase();
+     const allowed={approved:'Approved',rejected:'Rejected',cancelled:'Cancelled',canceled:'Cancelled'};
+     const status=allowed[requested];
+     if(!status)return send(res,400,{error:'Status must be Approved, Rejected or Cancelled.'});
+     const ctx=await employeeLeaveContext(existing.employee_id);
+     if(!ctx)return send(res,404,{error:'Employee not found'});
+     let days=Number(existing.days||0),calculation=null;
+     if(status==='Approved'){
+       try{calculation=await leaveCalculation(existing.start_date,existing.end_date)}catch(e){return send(res,400,{error:e.message})}
+       days=calculation.leaveDays;
+       if(days<=0)return send(res,400,{error:'This request contains no chargeable leave days.'});
+       const before=leaveLogic.leaveBalance(ctx.employee,ctx.leaves,id);
+       if(days>before.remaining)return send(res,400,{error:`Cannot approve ${days} days; only ${before.remaining} days remain.`});
+     }
+     const row=(await sql`UPDATE leave_requests SET status=${status},days=${days} WHERE id=${id} RETURNING *`)[0];
+     const afterLeaves=ctx.leaves.map(l=>Number(l.id)===Number(id)?row:l);
+     const balance=leaveLogic.leaveBalance(ctx.employee,afterLeaves);
+     return send(res,200,{leave:row,calculation,balance});
+   }
+ }
  if(resource==='holidays'){if(!adminOnly(user,res))return;if(req.method==='POST'){const row=await sql`INSERT INTO holidays(holiday_date,name,type) VALUES(${body.holiday_date},${body.name},${body.type||'Company'}) RETURNING *`;return send(res,201,{holiday:row[0]})}if(req.method==='DELETE'&&id){await sql`DELETE FROM holidays WHERE id=${id}`;return send(res,200,{ok:true})}}
  if(resource==='payroll'){if(!adminOnly(user,res))return;if(req.method==='POST'){const basic=Number(body.basic_salary||0),allowances=Number(body.allowances||0),deductions=Number(body.deductions||0);const row=await sql`INSERT INTO payroll(employee_id,pay_month,basic_salary,allowances,deductions,net_salary) VALUES(${body.employee_id},${body.pay_month},${basic},${allowances},${deductions},${basic+allowances-deductions}) RETURNING *`;return send(res,201,{payroll:row[0]})}}
  if(resource==='eosb'){if(!adminOnly(user,res))return;if(req.method==='POST'){const years=Number(body.service_years||0),salary=Number(body.last_salary||0);const benefit=salary*(years<=5?years*0.5:2.5+(years-5));const row=await sql`INSERT INTO eosb_records(employee_id,service_years,last_salary,benefit) VALUES(${body.employee_id},${years},${salary},${benefit}) RETURNING *`;return send(res,201,{eosb:row[0]})}}

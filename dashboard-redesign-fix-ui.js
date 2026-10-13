@@ -30,15 +30,66 @@
   function arabic(){return document.documentElement.dir==='rtl'||document.documentElement.lang==='ar';}
   function escName(v){return String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
   function employeeLabel(id){const e=(state.employees||[]).find(x=>String(x.employee_id)===String(id));return e?e.full_name:String(id||'');}
+  function lateMinutesFor(a){return Math.max(0,Number(a?.late_minutes||0),Number(a?.__fcDashboardLateMinutes||0));}
+  function clockMinutes(value){
+    const m=String(value||'').match(/[T\s](\d{2}):(\d{2})/)||String(value||'').match(/^(\d{2}):(\d{2})/);
+    return m?Number(m[1])*60+Number(m[2]):null;
+  }
+  function weekdayName(date){
+    return new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Riyadh',weekday:'short'}).format(new Date(date+'T12:00:00Z'));
+  }
+  function effectiveScheduleFor(employeeId,date,schedules,history){
+    const versions=(history||[]).filter(x=>String(x.employee_id)===String(employeeId)&&dateOnly(x.effective_from)<=date&&x.start_time&&x.end_time)
+      .sort((a,b)=>dateOnly(b.effective_from).localeCompare(dateOnly(a.effective_from)));
+    if(versions.length)return versions[0];
+    return (schedules||[]).find(x=>String(x.employee_id)===String(employeeId)&&x.start_time&&x.end_time)||null;
+  }
+  let lateReconcileKey='';
+  let lateReconcileInFlight=false;
+  async function reconcileLateFromSchedule(today,attendance){
+    const key=JSON.stringify([today,...attendance.map(a=>[a.id,a.employee_id,a.check_in,a.late_minutes])]);
+    if(key===lateReconcileKey||lateReconcileInFlight)return;
+    lateReconcileKey=key;
+    lateReconcileInFlight=true;
+    try{
+      const r=await fetch('/api/work-schedule',{headers:{Authorization:'Bearer '+localStorage.getItem('fc_hrms_token')}});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw Error(d.error||'Could not load work schedules');
+      const schedules=Array.isArray(d.schedules)?d.schedules:[];
+      const history=Array.isArray(d.history)?d.history:[];
+      const weekday=weekdayName(today);
+      let changed=false;
+      attendance.forEach(a=>{
+        const schedule=effectiveScheduleFor(a.employee_id,today,schedules,history);
+        let derived=0;
+        if(schedule){
+          const workDays=new Set(String(schedule.work_days||'').split(',').filter(Boolean));
+          const start=clockMinutes(schedule.start_time);
+          const checkIn=clockMinutes(a.check_in);
+          const grace=Math.max(0,Number(schedule.grace_minutes||0));
+          if(workDays.has(weekday)&&start!=null&&checkIn!=null)derived=Math.max(0,checkIn-(start+grace));
+        }
+        if(Number(a.__fcDashboardLateMinutes||0)!==derived){
+          a.__fcDashboardLateMinutes=derived;
+          changed=true;
+        }
+      });
+      if(changed)setTimeout(polish,0);
+    }catch(_){
+      // Keep the recorded late_minutes values if schedule history cannot be loaded.
+    }finally{
+      lateReconcileInFlight=false;
+    }
+  }
   function attendanceNamesMarkup(employees,attendance,presentIds,lateIds,leaveIds){
-    const lateRows=attendance.filter(a=>lateIds.has(a.employee_id)).sort((a,b)=>Number(b.late_minutes||0)-Number(a.late_minutes||0));
+    const lateRows=attendance.filter(a=>lateIds.has(a.employee_id)).sort((a,b)=>lateMinutesFor(b)-lateMinutesFor(a));
     const notCheckedEmployees=employees.filter(e=>!presentIds.has(e.employee_id)&&!leaveIds.has(e.employee_id));
     const lateTitle=arabic()?'المتأخرون اليوم':'Late Today';
     const absentTitle=arabic()?'لم يسجلوا الحضور':'Not Checked In';
     const noneLate=arabic()?'لا يوجد موظفون متأخرون اليوم.':'No late employees today.';
     const noneAbsent=arabic()?'جميع الموظفين سجلوا الحضور أو لديهم إجازة معتمدة.':'Everyone checked in or is on approved leave.';
     const minLabel=arabic()?'د':'m';
-    const lateBody=lateRows.length?lateRows.map(a=>`<div class="fc-att-name-row"><div class="fc-att-name-main">${escName(employeeLabel(a.employee_id))}</div><div class="fc-att-name-meta">${Math.max(0,Number(a.late_minutes||0))}${minLabel}</div></div>`).join(''):`<div class="fc-att-name-empty">${noneLate}</div>`;
+    const lateBody=lateRows.length?lateRows.map(a=>`<div class="fc-att-name-row"><div class="fc-att-name-main">${escName(employeeLabel(a.employee_id))}</div><div class="fc-att-name-meta">${lateMinutesFor(a)}${minLabel}</div></div>`).join(''):`<div class="fc-att-name-empty">${noneLate}</div>`;
     const absentBody=notCheckedEmployees.length?notCheckedEmployees.map(e=>`<div class="fc-att-name-row"><div class="fc-att-name-main">${escName(e.full_name||e.employee_id)}</div><div class="fc-att-name-meta">${escName(e.employee_id||'')}</div></div>`).join(''):`<div class="fc-att-name-empty">${noneAbsent}</div>`;
     return `<div class="fc-att-name-grid" id="fcDashAttendanceNames"><div class="fc-att-name-box"><div class="fc-att-name-head"><span>${lateTitle}</span><span class="fc-att-name-count">${lateRows.length}</span></div><div class="fc-att-name-list">${lateBody}</div></div><div class="fc-att-name-box"><div class="fc-att-name-head"><span>${absentTitle}</span><span class="fc-att-name-count">${notCheckedEmployees.length}</span></div><div class="fc-att-name-list">${absentBody}</div></div></div>`;
   }
@@ -54,8 +105,9 @@
     const employees=(state.employees||[]).filter(e=>String(e.status||'').toLowerCase()!=='inactive');
     const attendance=(state.attendance||[]).filter(a=>dateOnly(a.work_date)===today&&String(a.status||'').toLowerCase()!=='absent');
     const presentIds=new Set(attendance.map(a=>a.employee_id));
-    const lateIds=new Set(attendance.filter(a=>Number(a.late_minutes||0)>0).map(a=>a.employee_id));
+    const lateIds=new Set(attendance.filter(a=>lateMinutesFor(a)>0).map(a=>a.employee_id));
     const leaveIds=new Set((state.leaves||[]).filter(l=>String(l.status||'').toLowerCase()==='approved'&&dateOnly(l.start_date)<=today&&dateOnly(l.end_date)>=today).map(l=>l.employee_id));
+    reconcileLateFromSchedule(today,attendance);
     const onTime=Math.max(0,presentIds.size-lateIds.size);
     const late=lateIds.size;
     const onLeave=leaveIds.size;
@@ -79,7 +131,7 @@
     });
     const panel=chart.closest('.fc-dash-panel-body');
     if(panel){
-      const lateSignature=attendance.filter(a=>lateIds.has(a.employee_id)).map(a=>[String(a.employee_id),Number(a.late_minutes||0)]);
+      const lateSignature=attendance.filter(a=>lateIds.has(a.employee_id)).map(a=>[String(a.employee_id),lateMinutesFor(a)]);
       const absentSignature=employees.filter(e=>!presentIds.has(e.employee_id)&&!leaveIds.has(e.employee_id)).map(e=>String(e.employee_id));
       const signature=JSON.stringify({lang:arabic()?'ar':'en',late:lateSignature,absent:absentSignature});
       const existing=panel.querySelector('#fcDashAttendanceNames');

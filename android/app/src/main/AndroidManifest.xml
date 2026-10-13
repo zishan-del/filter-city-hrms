@@ -5,7 +5,7 @@
 
     <application
         android:theme="@style/Theme.LauncherActivity"
-        android:label="FILTER CITY HRMS"
+        android:label="${appLabel}"
         android:icon="@drawable/ic_filter_city"
         android:roundIcon="@drawable/ic_filter_city"
         android:allowBackup="false"
@@ -20,7 +20,7 @@
         <activity
             android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
             android:theme="@style/Theme.LauncherActivity"
-            android:label="FILTER CITY HRMS"
+            android:label="${appLabel}"
             android:exported="true"
             android:launchMode="singleTask">
 

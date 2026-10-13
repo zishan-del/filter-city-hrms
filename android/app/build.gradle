@@ -10,6 +10,7 @@ android {
         targetSdk 36
         versionCode 3
         versionName '1.0.2-twa-fix'
+        manifestPlaceholders = [appLabel: 'FILTER CITY HRMS']
     }
 
     def uploadKeystore = System.getenv('FC_UPLOAD_KEYSTORE')
@@ -25,6 +26,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix '.twatest'
+            versionNameSuffix '-test'
+            manifestPlaceholders = [appLabel: 'FILTER CITY HRMS TWA TEST']
+        }
         release {
             minifyEnabled false
             if (uploadKeystore) signingConfig signingConfigs.release

@@ -53,11 +53,22 @@
     return new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Riyadh',weekday:'short'}).format(new Date(date+'T12:00:00Z'));
   }
   function sameEmployee(a,b){return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();}
+  const COMPANY_DEFAULT_LATE_RULE={
+    work_days:'Sun,Mon,Tue,Wed,Thu,Sat',
+    start_time:'08:00',
+    end_time:'18:00',
+    grace_minutes:15,
+    __fcCompanyDefault:true
+  };
   function effectiveScheduleFor(employeeId,date,schedules,history){
     const versions=(history||[]).filter(x=>sameEmployee(x.employee_id,employeeId)&&dateOnly(x.effective_from)<=date&&x.start_time&&x.end_time)
       .sort((a,b)=>dateOnly(b.effective_from).localeCompare(dateOnly(a.effective_from)));
     if(versions.length)return versions[0];
-    return (schedules||[]).find(x=>sameEmployee(x.employee_id,employeeId)&&x.start_time&&x.end_time)||null;
+    const current=(schedules||[]).find(x=>sameEmployee(x.employee_id,employeeId)&&x.start_time&&x.end_time);
+    // Dashboard must not silently treat an employee as on-time just because a personal
+    // schedule has not yet been configured. Use FILTER CITY's established late rule
+    // for display only: 08:00 start, 15-minute grace, Friday off.
+    return current||COMPANY_DEFAULT_LATE_RULE;
   }
   let lateReconcileKey='';
   let lateReconcileInFlight=false;

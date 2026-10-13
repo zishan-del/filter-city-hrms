@@ -395,8 +395,10 @@ module.exports=async(req,res)=>{
       const employees=await sql`SELECT employee_id,full_name,status FROM employees WHERE lower(full_name) LIKE '%zishan%' OR lower(full_name) LIKE '%ali%' ORDER BY full_name`;
       const ids=employees.map(e=>e.employee_id);
       const attendance=ids.length?await sql`SELECT employee_id,to_char(work_date,'YYYY-MM-DD') AS work_date,check_in::text AS check_in,late_minutes,status FROM attendance WHERE employee_id = ANY(${ids}) AND work_date=${today} ORDER BY employee_id`:[];
-      const schedules=ids.length?await sql`SELECT employee_id,to_char(effective_from,'YYYY-MM-DD') AS effective_from,work_days,to_char(start_time,'HH24:MI') AS start_time,to_char(end_time,'HH24:MI') AS end_time,grace_minutes,break_minutes FROM work_schedule_history WHERE employee_id = ANY(${ids}) AND effective_from<=${today} ORDER BY employee_id,effective_from DESC`:[];
-      return send(res,200,{today,employees,attendance,schedules},attendanceMode);
+      const schedules=ids.length?await sql`SELECT employee_id,to_char(effective_from,'YYYY-MM-DD') AS effective_from,work_days,to_char(start_time,'HH24:MI') AS start_time,to_char(end_time,'HH24:MI') AS end_time,grace_minutes,break_minutes FROM work_schedule_history WHERE employee_id = ANY(${ids}) ORDER BY employee_id,effective_from DESC`:[];
+      const currentSchedules=ids.length?await sql`SELECT employee_id,work_days,to_char(start_time,'HH24:MI') AS start_time,to_char(end_time,'HH24:MI') AS end_time,grace_minutes,break_minutes FROM work_schedules WHERE employee_id = ANY(${ids}) ORDER BY employee_id`:[];
+      const settings=await sql`SELECT hours FROM settings WHERE id=1 LIMIT 1`;
+      return send(res,200,{today,employees,attendance,schedules,currentSchedules,settings:settings[0]||null},attendanceMode);
     }
     const user=decodeToken(req);
     if(!user)return send(res,401,{error:'Unauthorized'},attendanceMode);

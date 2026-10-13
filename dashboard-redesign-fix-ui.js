@@ -79,8 +79,19 @@
     });
     const panel=chart.closest('.fc-dash-panel-body');
     if(panel){
-      panel.querySelector('#fcDashAttendanceNames')?.remove();
-      panel.insertAdjacentHTML('beforeend',attendanceNamesMarkup(employees,attendance,presentIds,lateIds,leaveIds));
+      const lateSignature=attendance.filter(a=>lateIds.has(a.employee_id)).map(a=>[String(a.employee_id),Number(a.late_minutes||0)]);
+      const absentSignature=employees.filter(e=>!presentIds.has(e.employee_id)&&!leaveIds.has(e.employee_id)).map(e=>String(e.employee_id));
+      const signature=JSON.stringify({lang:arabic()?'ar':'en',late:lateSignature,absent:absentSignature});
+      const existing=panel.querySelector('#fcDashAttendanceNames');
+      if(!existing||existing.dataset.signature!==signature){
+        const holder=document.createElement('div');
+        holder.innerHTML=attendanceNamesMarkup(employees,attendance,presentIds,lateIds,leaveIds).trim();
+        const node=holder.firstElementChild;
+        if(node){
+          node.dataset.signature=signature;
+          if(existing)existing.replaceWith(node);else panel.appendChild(node);
+        }
+      }
     }
   }
 

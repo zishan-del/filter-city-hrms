@@ -32,17 +32,32 @@
   function employeeLabel(id){const e=(state.employees||[]).find(x=>String(x.employee_id)===String(id));return e?e.full_name:String(id||'');}
   function lateMinutesFor(a){return Math.max(0,Number(a?.late_minutes||0),Number(a?.__fcDashboardLateMinutes||0));}
   function clockMinutes(value){
-    const m=String(value||'').match(/[T\s](\d{2}):(\d{2})/)||String(value||'').match(/^(\d{2}):(\d{2})/);
+    const raw=String(value||'').trim();
+    if(!raw)return null;
+    // TIMESTAMPTZ values returned by PostgreSQL/Neon are absolute instants.
+    // Convert them to Riyadh time before comparing with the employee's local shift.
+    if(/[zZ]$/.test(raw)||/[+-]\d{2}:?\d{2}$/.test(raw)){
+      const d=new Date(raw);
+      if(!Number.isNaN(d.getTime())){
+        const parts={};
+        new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Riyadh',hour:'2-digit',minute:'2-digit',hourCycle:'h23'})
+          .formatToParts(d).forEach(p=>{if(p.type!=='literal')parts[p.type]=p.value;});
+        if(parts.hour!=null&&parts.minute!=null)return Number(parts.hour)*60+Number(parts.minute);
+      }
+    }
+    // Local TIME / local datetime strings are already in the HRMS work-schedule clock.
+    const m=raw.match(/[T\s](\d{2}):(\d{2})/)||raw.match(/^(\d{2}):(\d{2})/);
     return m?Number(m[1])*60+Number(m[2]):null;
   }
   function weekdayName(date){
     return new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Riyadh',weekday:'short'}).format(new Date(date+'T12:00:00Z'));
   }
+  function sameEmployee(a,b){return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();}
   function effectiveScheduleFor(employeeId,date,schedules,history){
-    const versions=(history||[]).filter(x=>String(x.employee_id)===String(employeeId)&&dateOnly(x.effective_from)<=date&&x.start_time&&x.end_time)
+    const versions=(history||[]).filter(x=>sameEmployee(x.employee_id,employeeId)&&dateOnly(x.effective_from)<=date&&x.start_time&&x.end_time)
       .sort((a,b)=>dateOnly(b.effective_from).localeCompare(dateOnly(a.effective_from)));
     if(versions.length)return versions[0];
-    return (schedules||[]).find(x=>String(x.employee_id)===String(employeeId)&&x.start_time&&x.end_time)||null;
+    return (schedules||[]).find(x=>sameEmployee(x.employee_id,employeeId)&&x.start_time&&x.end_time)||null;
   }
   let lateReconcileKey='';
   let lateReconcileInFlight=false;
@@ -63,11 +78,12 @@
         const schedule=effectiveScheduleFor(a.employee_id,today,schedules,history);
         let derived=0;
         if(schedule){
-          const workDays=new Set(String(schedule.work_days||'').split(',').filter(Boolean));
+          const workDays=new Set(String(schedule.work_days||'').split(',').map(x=>x.trim()).filter(Boolean));
           const start=clockMinutes(schedule.start_time);
           const checkIn=clockMinutes(a.check_in);
           const grace=Math.max(0,Number(schedule.grace_minutes||0));
-          if(workDays.has(weekday)&&start!=null&&checkIn!=null)derived=Math.max(0,checkIn-(start+grace));
+          const scheduledToday=workDays.has(weekday)||workDays.has(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Riyadh',weekday:'long'}).format(new Date(today+'T12:00:00Z')));
+          if(scheduledToday&&start!=null&&checkIn!=null)derived=Math.max(0,checkIn-(start+grace));
         }
         if(Number(a.__fcDashboardLateMinutes||0)!==derived){
           a.__fcDashboardLateMinutes=derived;

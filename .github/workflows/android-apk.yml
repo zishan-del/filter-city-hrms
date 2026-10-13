@@ -2,7 +2,7 @@ name: Build FILTER CITY HRMS APK
 
 on:
   push:
-    branches: [app-build, release-final-2026-09-03, store-release-prep-2026-09-03, fix-native-notifications-2026-09-05]
+    branches: [app-build, release-final-2026-09-03, store-release-prep-2026-09-03, fix-native-notifications-2026-09-05, fix-twa-app-mode-2026-10-13]
     paths:
       - 'android/**'
       - '.github/workflows/android-apk.yml'
@@ -27,6 +27,47 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Verify TWA Digital Asset Links
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="filter-city-hrms-git-fix-native-notifications-c42395-filtercity.vercel.app"
+          PLAY_FP="5A:D7:74:70:20:D0:2F:4A:7B:10:D7:A8:7E:29:88:87:B0:C7:FC:0F:70:F5:33:89:FD:0A:AE:5E:96:D9:6C:DC"
+          DEBUG_FP="FE:6C:34:E8:77:C8:1E:3A:72:01:45:0E:60:B0:5B:BE:8C:8F:43:B4:75:69:5C:9B:A5:4F:8D:86:66:13:FC:A5"
+          curl -fsS "https://$HOST/.well-known/assetlinks.json" -o /tmp/assetlinks.json
+          python - <<'PY'
+          import json
+          p="/tmp/assetlinks.json"
+          data=json.load(open(p))
+          fp=set()
+          for row in data:
+              t=row.get("target",{})
+              if t.get("namespace")=="android_app" and t.get("package_name")=="com.filtercity.hrms":
+                  fp.update(t.get("sha256_cert_fingerprints",[]))
+          need={
+          "5A:D7:74:70:20:D0:2F:4A:7B:10:D7:A8:7E:29:88:87:B0:C7:FC:0F:70:F5:33:89:FD:0A:AE:5E:96:D9:6C:DC",
+          "FE:6C:34:E8:77:C8:1E:3A:72:01:45:0E:60:B0:5B:BE:8C:8F:43:B4:75:69:5C:9B:A5:4F:8D:86:66:13:FC:A5"}
+          assert need <= fp, (need, fp)
+          print("assetlinks.json contains Play and debug fingerprints")
+          PY
+          API="https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https%3A%2F%2F$HOST&relation=delegate_permission%2Fcommon.handle_all_urls"
+          curl -fsS "$API" -o /tmp/dal.json
+          grep -Fq "$PLAY_FP" /tmp/dal.json
+          grep -Fq "$DEBUG_FP" /tmp/dal.json
+          grep -Fq '"packageName": "com.filtercity.hrms"' /tmp/dal.json
+          echo "Google Digital Asset Links API confirms both certificates"
+
+      - name: Verify TWA app-to-site metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'android.support.customtabs.trusted.DEFAULT_URL' android/app/src/main/AndroidManifest.xml
+          grep -Fq 'android.support.customtabs.trusted.DISPLAY_MODE' android/app/src/main/AndroidManifest.xml
+          grep -Fq 'sticky-immersive' android/app/src/main/AndroidManifest.xml
+          grep -Fq 'filter-city-hrms-git-fix-native-notifications-c42395-filtercity.vercel.app' android/app/src/main/res/values/twa.xml
+          grep -Fq 'delegate_permission/common.handle_all_urls' android/app/src/main/res/values/twa.xml
+          echo "TWA app-to-site metadata is aligned"
+
       - name: Build debug APK
         working-directory: android
         run: gradle --no-daemon assembleDebug

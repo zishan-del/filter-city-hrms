@@ -55,7 +55,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="https"
-                    android:host="filter-city-hrms-git-fix-native-notifications-c42395-filtercity.vercel.app" />
+                    android:host="filter-city-hrms-git-fix-twa-app-mode-2026-10-13-filtercity.vercel.app" />
             </intent-filter>
         </activity>
 

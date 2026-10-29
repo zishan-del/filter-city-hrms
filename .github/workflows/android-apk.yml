@@ -74,6 +74,12 @@ jobs:
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
+      - name: Record APK signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | tee apk-cert.txt
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -88,7 +94,22 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            bash -lc 'set -e; APP_ID="com.filtercity.hrms"; if [ "$GITHUB_REF_NAME" = "fix-twa-app-mode-2026-10-13" ]; then APP_ID="com.filtercity.hrms.twatest"; fi; adb install -r android/app/build/outputs/apk/debug/app-debug.apk; adb logcat -c; adb shell am start -W -n "$APP_ID/com.google.androidbrowserhelper.trusted.LauncherActivity" | tee launch-result.txt; grep -q "Status: ok" launch-result.txt; sleep 6; adb logcat -d > launch-log.txt; if grep -Fq "FATAL EXCEPTION" launch-log.txt && grep -Fq "Process: $APP_ID" launch-log.txt; then echo "FILTER CITY HRMS crashed during launch"; grep -A 30 -B 5 "Process: $APP_ID" launch-log.txt || true; exit 1; fi; echo "APK startup smoke test passed for $APP_ID"'
+            bash -lc 'set -e; APP_ID="com.filtercity.hrms"; if [ "$GITHUB_REF_NAME" = "fix-twa-app-mode-2026-10-13" ]; then APP_ID="com.filtercity.hrms.twatest"; fi; adb install -r android/app/build/outputs/apk/debug/app-debug.apk; adb logcat -c; adb shell am start -W -n "$APP_ID/com.google.androidbrowserhelper.trusted.LauncherActivity" | tee launch-result.txt; grep -q "Status: ok" launch-result.txt; sleep 6; adb shell screencap -p /sdcard/twa-launch.png || true; adb pull /sdcard/twa-launch.png twa-launch.png || true; adb shell uiautomator dump /sdcard/twa-ui.xml || true; adb pull /sdcard/twa-ui.xml twa-ui.xml || true; adb shell dumpsys activity activities > twa-activity.txt || true; adb logcat -d > launch-log.txt; if grep -Fq "FATAL EXCEPTION" launch-log.txt && grep -Fq "Process: $APP_ID" launch-log.txt; then echo "FILTER CITY HRMS crashed during launch"; grep -A 30 -B 5 "Process: $APP_ID" launch-log.txt || true; exit 1; fi; echo "APK startup smoke test passed for $APP_ID"'
+
+      - name: Upload TWA launch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: filter-city-hrms-twa-launch-diagnostics
+          path: |
+            apk-cert.txt
+            launch-result.txt
+            launch-log.txt
+            twa-launch.png
+            twa-ui.xml
+            twa-activity.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
